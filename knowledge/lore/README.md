@@ -22,7 +22,7 @@ This directory documents the major storylines, server-wide events, recurring gam
 Season 1 (2012)     — Server founded by Generikb
 Season 6 (2018-19)  — Civil War (G-Team vs S.T.A.R.), Demise, Sahara
 Season 7 (2020)     — Mycelium Resistance vs HEP, Decked Out, Head Games
-Season 8 (2020-21)  — Boatem group, unique one-biome island world
+Season 8 (2021)     — Boatem group, Big Moon Incident, season ended Dec 22
 Season 9 (2022-23)  — Boatem continues, Decked Out 2, Soup Group, prank wars
 Season 10 (2024)    — Demise returns (with Reapers), Hermit Permits, new Tag
 Season 11 (2025-)   — Decked Out 3, ongoing storylines

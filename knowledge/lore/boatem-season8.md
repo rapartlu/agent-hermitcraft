@@ -43,9 +43,15 @@ The five Hermits built their bases in close proximity, forming a small community
 
 Later in the season, the group collaborated on a **Boatem Gigabase** — a shared mega-structure encompassing the whole area, one of the largest collaborative builds of Season 8.
 
-## The Season End: Going Down the Hole
+## Mid-Season: Scar's Rocket Over the Boatem Hole
 
-In a fitting finale, **GoodTimesWithScar** built a rocket above the Boatem Hole with the intention of launching the Boatem group to safety as the season ended — but instead, the rockets sent the group *down* the hole rather than into space. A chaotic, perfect ending.
+At one point during the season, **GoodTimesWithScar** built a rocket above the Boatem Hole intending to launch himself to safety — it sent him *down* the hole instead. A recurring comedic bit that encapsulated the group's chaotic energy.
+
+> ⚠️ **Note:** An earlier version of this file incorrectly described this as the season-ending event. The actual season ending was the **Big Moon Incident** (see below).
+
+## The Season End: The Big Moon Incident
+
+Season 8 ended on **December 22, 2021** when the **Moon** — which had been visibly growing larger throughout the back half of the season — finally **crashed into the planet**. This was the culmination of the server-wide "Big Moon Incident" storyline, in which an in-universe cult (the Octagon, centred on Rendog's Octagon build) was theorised to have a Moon Magnet pulling it closer. The collision event brought the season to a dramatic close for all 26 members simultaneously.
 
 ## Season 9 Continuation
 
