@@ -36,7 +36,9 @@ Not publicly known.
 ## Members
 
 **Returning members (25):**
-BdoubleO100, Cubfan135, Docm77, EthosLab, FalseSymmetry, GeminiTay, GoodTimesWithScar, Grian, Hypnotizd, iJevin, ImpulseSV, Iskall85, JoeHills, Keralis, MumboJumbo, PearlescentMoon, Rendog, StressMonster101, TangoTek, TinfoilChef, VintageBeef, Welsknight, xBCrafted, Xisumavoid, Zedaph, ZombieCleo
+BdoubleO100, Cubfan135, Docm77, EthosLab, FalseSymmetry, GeminiTay, GoodTimesWithScar, Grian, Hypnotizd, iJevin, ImpulseSV, Iskall85, JoeHills, Keralis, MumboJumbo, PearlescentMoon, Rendog, StressMonster101, TangoTek, VintageBeef, Welsknight, xBCrafted, Xisumavoid, Zedaph, ZombieCleo
+
+*(TinfoilChef participated in Seasons 1–9 but did not return for Season 10)*
 
 **New members joining Season 10:**
 Skizzleman, SmallishBeans
