@@ -17,8 +17,10 @@ from tools.collab_query import (
     _resolve_hermit_name,
     _event_sort_key,
     find_shared_events,
+    find_top_collaborators,
     build_output,
     format_text,
+    format_top_collabs,
     main,
 )
 
@@ -369,6 +371,244 @@ class TestCLI(unittest.TestCase):
         )
         data = json.loads(out)
         self.assertGreater(data["event_count"], 0)
+
+
+# ---------------------------------------------------------------------------
+# find_top_collaborators
+# ---------------------------------------------------------------------------
+class TestFindTopCollaborators(unittest.TestCase):
+    def test_returns_list(self):
+        result = find_top_collaborators("Grian")
+        self.assertIsInstance(result, list)
+
+    def test_grian_has_results(self):
+        result = find_top_collaborators("Grian")
+        self.assertGreater(len(result), 0)
+
+    def test_each_entry_has_required_keys(self):
+        for entry in find_top_collaborators("Grian"):
+            self.assertIn("rank", entry)
+            self.assertIn("hermit", entry)
+            self.assertIn("event_count", entry)
+            self.assertIn("seasons", entry)
+
+    def test_sorted_descending_by_count(self):
+        result = find_top_collaborators("Grian")
+        counts = [e["event_count"] for e in result]
+        self.assertEqual(counts, sorted(counts, reverse=True))
+
+    def test_ranks_are_sequential_from_1(self):
+        result = find_top_collaborators("Grian", top_n=5)
+        ranks = [e["rank"] for e in result]
+        self.assertEqual(ranks, list(range(1, len(result) + 1)))
+
+    def test_target_hermit_not_in_results(self):
+        result = find_top_collaborators("Grian")
+        names = [_normalise(e["hermit"]) for e in result]
+        self.assertNotIn("grian", names)
+
+    def test_top_n_limits_results(self):
+        result = find_top_collaborators("Grian", top_n=3)
+        self.assertLessEqual(len(result), 3)
+
+    def test_top_n_1_returns_at_most_1(self):
+        result = find_top_collaborators("Grian", top_n=1)
+        self.assertEqual(len(result), 1)
+
+    def test_season_filter_applied(self):
+        result = find_top_collaborators("Grian", season_filter=7)
+        for entry in result:
+            self.assertIn(7, entry["seasons"])
+
+    def test_season_filter_reduces_results(self):
+        all_result = find_top_collaborators("Grian")
+        s7_result = find_top_collaborators("Grian", season_filter=7)
+        # Season-filtered can only have <= partners than all-seasons
+        all_total = sum(e["event_count"] for e in all_result)
+        s7_total = sum(e["event_count"] for e in s7_result)
+        self.assertLessEqual(s7_total, all_total)
+
+    def test_type_filter_applied(self):
+        result = find_top_collaborators("Grian", type_filter=["lore"])
+        # If any events come back, they must be lore
+        # (We can't easily assert count without loading events ourselves,
+        #  but we can verify the function runs without error and returns a list.)
+        self.assertIsInstance(result, list)
+
+    def test_seasons_list_is_sorted(self):
+        for entry in find_top_collaborators("Grian"):
+            seasons = entry["seasons"]
+            self.assertEqual(seasons, sorted(seasons))
+
+    def test_event_count_matches_find_shared_events(self):
+        result = find_top_collaborators("Grian", top_n=3)
+        for entry in result:
+            expected = len(find_shared_events("Grian", entry["hermit"]))
+            self.assertEqual(entry["event_count"], expected)
+
+    def test_nonexistent_hermit_returns_empty(self):
+        result = find_top_collaborators("xyzNobody999")
+        self.assertEqual(result, [])
+
+
+# ---------------------------------------------------------------------------
+# format_top_collabs
+# ---------------------------------------------------------------------------
+class TestFormatTopCollabs(unittest.TestCase):
+    def setUp(self):
+        self.ranked = find_top_collaborators("Grian", top_n=5)
+        self.text = format_top_collabs("Grian", self.ranked)
+
+    def test_returns_string(self):
+        self.assertIsInstance(self.text, str)
+
+    def test_contains_hermit_name(self):
+        self.assertIn("Grian", self.text)
+
+    def test_contains_top_collaborator(self):
+        if self.ranked:
+            top_name = self.ranked[0]["hermit"]
+            self.assertIn(top_name, self.text)
+
+    def test_season_label_all_seasons(self):
+        self.assertIn("all seasons", self.text)
+
+    def test_season_label_specific_season(self):
+        ranked = find_top_collaborators("Grian", season_filter=7, top_n=3)
+        text = format_top_collabs("Grian", ranked, season_filter=7)
+        self.assertIn("Season 7", text)
+
+    def test_empty_ranked_shows_no_events_message(self):
+        text = format_top_collabs("Grian", [])
+        self.assertIn("no shared events", text.lower())
+
+    def test_rank_numbers_shown(self):
+        for entry in self.ranked:
+            self.assertIn(str(entry["rank"]), self.text)
+
+
+# ---------------------------------------------------------------------------
+# CLI — top-collabs mode
+# ---------------------------------------------------------------------------
+class TestCLITopCollabs(unittest.TestCase):
+    def _run(self, args: list[str]) -> tuple[int, str, str]:
+        import io
+        from contextlib import redirect_stdout, redirect_stderr
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(args)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_top_collabs_exits_0(self):
+        rc, _, _ = self._run(["--hermit-a", "Grian", "--top-collabs"])
+        self.assertEqual(rc, 0)
+
+    def test_top_collabs_no_hermit_b_required(self):
+        # Must not error because --hermit-b is absent
+        rc, _, err = self._run(["--hermit-a", "Grian", "--top-collabs"])
+        self.assertEqual(rc, 0)
+        self.assertNotIn("required", err)
+
+    def test_top_collabs_output_contains_hermit_a(self):
+        _, out, _ = self._run(["--hermit-a", "Grian", "--top-collabs"])
+        self.assertIn("Grian", out)
+
+    def test_top_collabs_output_contains_collaborator(self):
+        _, out, _ = self._run(["--hermit-a", "Grian", "--top-collabs"])
+        # At least one known collaborator should appear
+        self.assertIn("Mumbo", out)
+
+    def test_top_collabs_json_valid(self):
+        rc, out, _ = self._run(["--hermit-a", "Grian", "--top-collabs", "--json"])
+        self.assertEqual(rc, 0)
+        data = json.loads(out)
+        self.assertIn("leaderboard", data)
+        self.assertIn("hermit", data)
+
+    def test_top_collabs_json_leaderboard_is_list(self):
+        _, out, _ = self._run(["--hermit-a", "Grian", "--top-collabs", "--json"])
+        data = json.loads(out)
+        self.assertIsInstance(data["leaderboard"], list)
+
+    def test_top_collabs_json_leaderboard_nonempty(self):
+        _, out, _ = self._run(["--hermit-a", "Grian", "--top-collabs", "--json"])
+        data = json.loads(out)
+        self.assertGreater(len(data["leaderboard"]), 0)
+
+    def test_top_collabs_json_leaderboard_entry_keys(self):
+        _, out, _ = self._run(["--hermit-a", "Grian", "--top-collabs", "--json"])
+        data = json.loads(out)
+        first = data["leaderboard"][0]
+        for key in ("rank", "hermit", "event_count", "seasons"):
+            self.assertIn(key, first)
+
+    def test_top_flag_limits_results(self):
+        _, out, _ = self._run(
+            ["--hermit-a", "Grian", "--top-collabs", "--top", "3", "--json"]
+        )
+        data = json.loads(out)
+        self.assertLessEqual(len(data["leaderboard"]), 3)
+
+    def test_top_flag_default_is_10(self):
+        _, out, _ = self._run(
+            ["--hermit-a", "Grian", "--top-collabs", "--json"]
+        )
+        data = json.loads(out)
+        self.assertLessEqual(len(data["leaderboard"]), 10)
+
+    def test_season_filter_composable(self):
+        _, out, _ = self._run(
+            ["--hermit-a", "Grian", "--top-collabs", "--season", "7", "--json"]
+        )
+        data = json.loads(out)
+        self.assertEqual(data.get("season_filter"), 7)
+        for entry in data["leaderboard"]:
+            self.assertIn(7, entry["seasons"])
+
+    def test_json_season_filter_absent_when_not_set(self):
+        # Consistent with pairwise mode: omit key when no filter applied
+        _, out, _ = self._run(["--hermit-a", "Grian", "--top-collabs", "--json"])
+        data = json.loads(out)
+        self.assertNotIn("season_filter", data)
+
+    def test_types_flag_forwarded(self):
+        # Should not error; result may be empty but must exit 0
+        rc, out, _ = self._run(
+            ["--hermit-a", "Grian", "--top-collabs", "--types", "lore", "--json"]
+        )
+        self.assertEqual(rc, 0)
+        data = json.loads(out)
+        self.assertIn("leaderboard", data)
+        self.assertEqual(data.get("type_filter"), ["lore"])
+
+    def test_not_found_hermit_a_exits_1(self):
+        rc, _, err = self._run(["--hermit-a", "xyz999", "--top-collabs"])
+        self.assertEqual(rc, 1)
+        self.assertIn("No profile found", err)
+
+    def test_case_insensitive_hermit_a(self):
+        rc, _, _ = self._run(["--hermit-a", "grian", "--top-collabs"])
+        self.assertEqual(rc, 0)
+
+    def test_partial_name_hermit_a(self):
+        rc, _, _ = self._run(["--hermit-a", "tango", "--top-collabs"])
+        self.assertEqual(rc, 0)
+
+    def test_hermit_b_with_top_collabs_warns(self):
+        # --hermit-b is silently ignored in --top-collabs mode;
+        # a warning should be emitted to stderr.
+        rc, _, err = self._run(
+            ["--hermit-a", "Grian", "--top-collabs", "--hermit-b", "Scar"]
+        )
+        self.assertEqual(rc, 0)
+        self.assertIn("--hermit-b", err)
+        self.assertIn("ignored", err)
+
+    def test_hermit_b_absent_no_warning(self):
+        # No spurious warning when --hermit-b is not supplied.
+        rc, _, err = self._run(["--hermit-a", "Grian", "--top-collabs"])
+        self.assertEqual(rc, 0)
+        self.assertNotIn("--hermit-b", err)
 
 
 if __name__ == "__main__":
