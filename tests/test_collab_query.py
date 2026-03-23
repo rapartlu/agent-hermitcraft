@@ -594,6 +594,22 @@ class TestCLITopCollabs(unittest.TestCase):
         rc, _, _ = self._run(["--hermit-a", "tango", "--top-collabs"])
         self.assertEqual(rc, 0)
 
+    def test_hermit_b_with_top_collabs_warns(self):
+        # --hermit-b is silently ignored in --top-collabs mode;
+        # a warning should be emitted to stderr.
+        rc, _, err = self._run(
+            ["--hermit-a", "Grian", "--top-collabs", "--hermit-b", "Scar"]
+        )
+        self.assertEqual(rc, 0)
+        self.assertIn("--hermit-b", err)
+        self.assertIn("ignored", err)
+
+    def test_hermit_b_absent_no_warning(self):
+        # No spurious warning when --hermit-b is not supplied.
+        rc, _, err = self._run(["--hermit-a", "Grian", "--top-collabs"])
+        self.assertEqual(rc, 0)
+        self.assertNotIn("--hermit-b", err)
+
 
 if __name__ == "__main__":
     unittest.main()

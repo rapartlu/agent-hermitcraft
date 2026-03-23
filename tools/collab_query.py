@@ -360,7 +360,7 @@ def format_top_collabs(
         seasons = entry.get("seasons", [])
         s_str = ", ".join(f"S{s}" for s in seasons) if seasons else ""
         s_part = f"  ({s_str})" if s_str else ""
-        plural = "s" if count != 1 else " "
+        plural = "s" if count != 1 else " "  # space (not "") keeps column alignment
         lines.append(
             f"  {rank:2d}. {hermit:<{col_w}}  "
             f"{count} shared event{plural}{s_part}"
@@ -415,7 +415,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--types",
         nargs="+",
         metavar="TYPE",
-        help="Restrict to event types (pairwise mode only), e.g. --types lore build",
+        help="Restrict to event types, e.g. --types lore build collab",
     )
     p.add_argument(
         "--json",
@@ -443,6 +443,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     # ── Top-collabs leaderboard mode ──────────────────────────────────────
+    if args.top_collabs and args.hermit_b is not None:
+        print(
+            "Warning: --hermit-b is ignored in --top-collabs mode",
+            file=sys.stderr,
+        )
+
     if args.top_collabs:
         ranked = find_top_collaborators(
             name_a,
