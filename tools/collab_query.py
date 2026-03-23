@@ -118,6 +118,7 @@ def find_shared_events(
     name_b: str,
     season_filter: int | None = None,
     type_filter: list[str] | None = None,
+    _events: list[dict] | None = None,
 ) -> list[dict]:
     """
     Return events where both *name_a* and *name_b* appear in the hermits list.
@@ -131,6 +132,8 @@ def find_shared_events(
         season_filter: If given, restrict to this season number.
         type_filter: If given, restrict to events whose ``type`` field is in
             this list (e.g. ``["lore", "build"]``).
+        _events: Pre-loaded event list (used by find_top_collaborators to
+            avoid re-reading files for every hermit pair).
 
     Returns:
         List of event dicts, sorted chronologically.
@@ -141,7 +144,7 @@ def find_shared_events(
         return []
     results: list[dict] = []
 
-    for ev in _load_all_events():
+    for ev in (_events if _events is not None else _load_all_events()):
         hermits = ev.get("hermits", [])
         if hermits == ["All"]:
             continue
@@ -183,6 +186,7 @@ def _all_hermit_names() -> list[str]:
 def find_top_collaborators(
     name_a: str,
     season_filter: int | None = None,
+    type_filter: list[str] | None = None,
     top_n: int = 10,
 ) -> list[dict]:
     """
@@ -194,6 +198,7 @@ def find_top_collaborators(
     Args:
         name_a: Canonical display name of the target hermit.
         season_filter: If given, restrict to this season number.
+        type_filter: If given, restrict to events of these types.
         top_n: Maximum number of results to return.
 
     Returns:
@@ -201,12 +206,20 @@ def find_top_collaborators(
     """
     all_names = _all_hermit_names()
     norm_a = _normalise(name_a)
+    # Load events once and reuse across all pair queries.
+    cached_events = _load_all_events()
 
     results: list[dict] = []
     for name_b in all_names:
         if _normalise(name_b) == norm_a:
             continue
-        events = find_shared_events(name_a, name_b, season_filter=season_filter)
+        events = find_shared_events(
+            name_a,
+            name_b,
+            season_filter=season_filter,
+            type_filter=type_filter,
+            _events=cached_events,
+        )
         if not events:
             continue
         seasons = _seasons_covered(events)
@@ -434,15 +447,19 @@ def main(argv: list[str] | None = None) -> int:
         ranked = find_top_collaborators(
             name_a,
             season_filter=args.season,
+            type_filter=args.types,
             top_n=args.top,
         )
         if args.json:
             out: dict = {
                 "hermit": name_a,
-                "season_filter": args.season,
                 "top_n": args.top,
                 "leaderboard": ranked,
             }
+            if args.season is not None:
+                out["season_filter"] = args.season
+            if args.types is not None:
+                out["type_filter"] = args.types
             print(json.dumps(out, indent=2))
         else:
             print(format_top_collabs(name_a, ranked, season_filter=args.season))
