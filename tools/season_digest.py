@@ -559,6 +559,7 @@ def _discord_highlights_value(highlights: list[dict]) -> tuple[str, int]:
     accurately even when the list is cut short by the character budget.
     """
     lines: list[str] = []
+    rendered_count = 0
     for entry in highlights:
         rank = entry["rank"]
         title = entry["title"]
@@ -569,11 +570,12 @@ def _discord_highlights_value(highlights: list[dict]) -> tuple[str, int]:
         # Add line only while we stay within the limit
         candidate = "\n".join(lines + [line])
         if len(candidate) > _DISCORD_FIELD_VALUE_LIMIT - 4:
-            lines.append(" …")
+            lines.append(" …")  # sentinel — not counted as a rendered entry
             break
         lines.append(line)
+        rendered_count += 1  # only real entries count
     text = "\n".join(lines) if lines else "*No highlights available.*"
-    return text, len(lines)
+    return text, rendered_count
 
 
 def _discord_collabs_value(collabs: list[dict]) -> str:
@@ -720,12 +722,13 @@ def build_discord_embed(digest: dict) -> dict:
                 len(longest["value"]) - 100,
             )
 
-    # Last resort: if title + footer alone exceed the limit (pathological case
-    # where all fields have been stripped), clamp title so the embed always
-    # satisfies the Discord total-character constraint.
+    # Last resort: if the embed still exceeds the limit after all fields are
+    # stripped (pathological case), clamp the title to the exact remaining
+    # budget.  Subtract the *current* char count minus the title length so that
+    # every other element (footer, any surviving fields, etc.) is accounted for.
     if _embed_char_count(embed) > _DISCORD_EMBED_TOTAL_LIMIT:
-        footer_text = embed.get("footer", {}).get("text", "")
-        remaining = _DISCORD_EMBED_TOTAL_LIMIT - len(footer_text)
+        current_without_title = _embed_char_count(embed) - len(embed.get("title", ""))
+        remaining = _DISCORD_EMBED_TOTAL_LIMIT - current_without_title
         embed["title"] = _truncate(embed["title"], max(10, remaining))
 
     return embed

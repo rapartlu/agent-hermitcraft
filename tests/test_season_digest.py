@@ -804,6 +804,8 @@ class TestBuildDiscordEmbed(unittest.TestCase):
         # Should include first two sentences only
         self.assertIn("Amazing season", arc_field["value"])
         self.assertIn("Boatem Hole", arc_field["value"])
+        # Third sentence must be absent — boundary condition
+        self.assertNotIn("Third sentence", arc_field["value"])
 
     def test_arc_empty_string_no_crash(self):
         digest = {
