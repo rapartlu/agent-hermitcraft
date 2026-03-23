@@ -16,6 +16,7 @@ Usage
   python3 tools/on_this_day.py --include-year                  # include year-only events
   python3 tools/on_this_day.py --include-hermit-anniversaries  # add hermit join/YT/subscriber anniversaries
   python3 tools/on_this_day.py --include-video-events          # add notable video/stream milestone events
+  python3 tools/on_this_day.py --digest                        # human-readable text digest (bot/Discord-ready)
   python3 tools/on_this_day.py --pretty                        # indented JSON array output
 
 Date precision handling
@@ -30,6 +31,7 @@ Output
 ------
 Newline-delimited JSON objects (NDJSON) sorted oldest-year-first.
 Use --pretty for a formatted JSON array.
+Use --digest for a human-readable text digest suitable for bots or terminals.
 
 Exit codes
 ----------
@@ -375,6 +377,85 @@ def filter_by_hermit(events: list[dict], hermit_name: str) -> list[dict]:
     return result
 
 
+_MONTH_NAMES = [
+    "", "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
+
+
+def format_digest(events: list[dict], month: int, day: int) -> str:
+    """
+    Return a human-readable "On This Day" digest string.
+
+    Suitable for terminal output, daily bots, or Discord posts.
+    Each event block shows: year, season, type, title, hermits,
+    and a word-wrapped description.
+
+    If *events* is empty a friendly "quiet day" message is returned;
+    the caller is still responsible for returning exit code 1.
+    """
+    hr_heavy = "═" * 60
+    hr_light = "─" * 58
+
+    month_name = _MONTH_NAMES[month] if 1 <= month <= 12 else str(month)
+    date_label = f"{month_name} {day}"
+
+    lines: list[str] = []
+    lines.append(hr_heavy)
+    lines.append("  ON THIS DAY IN HERMITCRAFT")
+    lines.append(f"  {date_label}")
+    lines.append(hr_heavy)
+
+    if not events:
+        lines.append("")
+        lines.append("  Nothing recorded in Hermitcraft history for this date.")
+        lines.append("  (Try --all-events or widen with --window)")
+        lines.append("")
+        lines.append(hr_heavy)
+        return "\n".join(lines)
+
+    for ev in events:
+        year, *_ = ev.get("date", "").split("-") + [""]
+        season = ev.get("season", 0)
+        ev_type = ev.get("type", "")
+        title = ev.get("title", "")
+        hermits: list = ev.get("hermits", [])
+        description = ev.get("description", "")
+
+        year_label = f"[{year}]" if year and year.isdigit() else "[?]"
+        season_label = f"Season {season}" if season else "pre-Hermitcraft"
+        type_label = ev_type if ev_type else "event"
+        hermit_str = ", ".join(hermits) if hermits else "unknown"
+
+        lines.append("")
+        lines.append(f"  {year_label}  {season_label}  ·  {type_label}")
+        lines.append(f"  {title}")
+        lines.append(f"  Hermits: {hermit_str}")
+        lines.append("  " + hr_light)
+
+        # Word-wrap description to ~76 chars
+        if description:
+            words = description.split()
+            row = ""
+            for w in words:
+                if len(row) + len(w) + 1 > 74:
+                    lines.append("  " + row)
+                    row = w
+                else:
+                    row = (row + " " + w).strip()
+            if row:
+                lines.append("  " + row)
+
+        lines.append("  " + hr_light)
+
+    lines.append("")
+    count = len(events)
+    lines.append(hr_heavy)
+    lines.append(f"  {count} event{'s' if count != 1 else ''} found")
+    lines.append(hr_heavy)
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="On This Day in Hermitcraft — historical event digest",
@@ -433,6 +514,14 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--digest", action="store_true",
+        help=(
+            "Output a human-readable text digest instead of JSON. "
+            "Suitable for terminal display, daily bots, or Discord posts. "
+            "Prints a friendly 'nothing found' message (exit 1) on empty results."
+        ),
+    )
+    parser.add_argument(
         "--pretty", action="store_true",
         help="Output a pretty-printed JSON array instead of NDJSON.",
     )
@@ -481,13 +570,18 @@ def main(argv: list[str] | None = None) -> int:
         results = filter_by_hermit(results, args.hermit)
 
     if not results:
-        sys.stderr.write(
-            f"[on_this_day] no events found for "
-            f"{target_month:02d}-{target_day:02d} (±{args.window} days)\n"
-        )
+        if args.digest:
+            print(format_digest([], target_month, target_day))
+        else:
+            sys.stderr.write(
+                f"[on_this_day] no events found for "
+                f"{target_month:02d}-{target_day:02d} (±{args.window} days)\n"
+            )
         return 1
 
-    if args.pretty:
+    if args.digest:
+        print(format_digest(results, target_month, target_day))
+    elif args.pretty:
         print(json.dumps(results, indent=2))
     else:
         for event in results:
