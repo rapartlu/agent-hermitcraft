@@ -1,0 +1,557 @@
+[
+  {
+    "id": "q001",
+    "question": "Who founded the Hermitcraft server?",
+    "options": ["Xisumavoid", "Generikb", "BdoubleO100", "Keralis"],
+    "answer": "Generikb",
+    "difficulty": "easy",
+    "category": "seasons",
+    "source": "knowledge/seasons/season-1.md"
+  },
+  {
+    "id": "q002",
+    "question": "In what year was Hermitcraft founded?",
+    "options": ["2010", "2011", "2012", "2013"],
+    "answer": "2012",
+    "difficulty": "easy",
+    "category": "seasons",
+    "source": "knowledge/seasons/season-1.md"
+  },
+  {
+    "id": "q003",
+    "question": "Who became server administrator after Generikb left?",
+    "options": ["BdoubleO100", "Mumbo Jumbo", "Xisumavoid", "EthosLab"],
+    "answer": "Xisumavoid",
+    "difficulty": "easy",
+    "category": "hermits",
+    "source": "knowledge/seasons/season-1.md"
+  },
+  {
+    "id": "q004",
+    "question": "Which hermit joined Hermitcraft in Season 6 and became its most-subscribed creator?",
+    "options": ["GeminiTay", "Grian", "SmallishBeans", "Skizzleman"],
+    "answer": "Grian",
+    "difficulty": "easy",
+    "category": "hermits",
+    "source": "knowledge/hermits/grian.md"
+  },
+  {
+    "id": "q005",
+    "question": "What is the name of TangoTek's famous dungeon-crawler card game built in Hermitcraft?",
+    "options": ["TangoTown", "Decked Out", "The Tangler", "Card Kingdom"],
+    "answer": "Decked Out",
+    "difficulty": "easy",
+    "category": "lore",
+    "source": "knowledge/hermits/tangotek.md"
+  },
+  {
+    "id": "q006",
+    "question": "Which season is the longest in Hermitcraft history?",
+    "options": ["Season 6", "Season 7", "Season 8", "Season 9"],
+    "answer": "Season 9",
+    "difficulty": "easy",
+    "category": "seasons",
+    "source": "knowledge/seasons/season-9.md"
+  },
+  {
+    "id": "q007",
+    "question": "Which season is the shortest vanilla season in Hermitcraft history?",
+    "options": ["Season 5", "Season 6", "Season 8", "Season 10"],
+    "answer": "Season 8",
+    "difficulty": "easy",
+    "category": "seasons",
+    "source": "knowledge/seasons/season-8.md"
+  },
+  {
+    "id": "q008",
+    "question": "What is Grian's most famous alter ego?",
+    "options": ["The Barge Man", "Poultry Man", "Hot Guy", "The Architect"],
+    "answer": "Poultry Man",
+    "difficulty": "easy",
+    "category": "lore",
+    "source": "knowledge/lore/in-jokes-and-memes.md"
+  },
+  {
+    "id": "q009",
+    "question": "Which hermit's real-life cat inspired an official Minecraft cat skin variant?",
+    "options": ["Grian", "Xisumavoid", "GoodTimesWithScar", "PearlescentMoon"],
+    "answer": "GoodTimesWithScar",
+    "difficulty": "easy",
+    "category": "hermits",
+    "source": "knowledge/lore/in-jokes-and-memes.md"
+  },
+  {
+    "id": "q010",
+    "question": "What material is Iskall85 famously known to despise?",
+    "options": ["Sand", "Gravel", "Diorite", "Andesite"],
+    "answer": "Diorite",
+    "difficulty": "easy",
+    "category": "hermits",
+    "source": "knowledge/lore/in-jokes-and-memes.md"
+  },
+  {
+    "id": "q011",
+    "question": "Who won the Demise game in Season 6?",
+    "options": ["Grian", "Mumbo Jumbo", "Iskall85", "Xisumavoid"],
+    "answer": "Iskall85",
+    "difficulty": "medium",
+    "category": "lore",
+    "source": "knowledge/lore/demise.md"
+  },
+  {
+    "id": "q012",
+    "question": "Who won the Demise game in Season 10?",
+    "options": ["Grian", "FalseSymmetry", "Xisumavoid", "GeminiTay"],
+    "answer": "FalseSymmetry",
+    "difficulty": "medium",
+    "category": "lore",
+    "source": "knowledge/lore/demise.md"
+  },
+  {
+    "id": "q013",
+    "question": "What was the entry cost for Demise in Season 6?",
+    "options": ["10 diamonds", "25 diamonds", "50 diamonds", "100 diamonds"],
+    "answer": "50 diamonds",
+    "difficulty": "medium",
+    "category": "lore",
+    "source": "knowledge/lore/demise.md"
+  },
+  {
+    "id": "q014",
+    "question": "What armor restriction applied to Demise contestants in Season 6?",
+    "options": ["No armor at all", "No diamond armor", "No enchanted armor", "Leather armor only"],
+    "answer": "No diamond armor",
+    "difficulty": "medium",
+    "category": "lore",
+    "source": "knowledge/lore/demise.md"
+  },
+  {
+    "id": "q015",
+    "question": "Who led the Mycelium Resistance in Season 7?",
+    "options": ["TangoTek", "Xisumavoid", "Grian", "ImpulseSV"],
+    "answer": "Grian",
+    "difficulty": "medium",
+    "category": "lore",
+    "source": "knowledge/lore/mycelium-resistance-season7.md"
+  },
+  {
+    "id": "q016",
+    "question": "Who led HEP (HermitCraft Environmental Protection) in Season 7?",
+    "options": ["Xisumavoid", "GoodTimesWithScar", "TangoTek", "Mumbo Jumbo"],
+    "answer": "GoodTimesWithScar",
+    "difficulty": "medium",
+    "category": "lore",
+    "source": "knowledge/lore/mycelium-resistance-season7.md"
+  },
+  {
+    "id": "q017",
+    "question": "What was the final Mycelium Resistance vs HEP score in their minigame series?",
+    "options": ["3-6", "5-4", "6-3", "7-2"],
+    "answer": "6-3",
+    "difficulty": "medium",
+    "category": "lore",
+    "source": "knowledge/lore/mycelium-resistance-season7.md"
+  },
+  {
+    "id": "q018",
+    "question": "What was the total profit earned by the Sahara mega-shop?",
+    "options": ["64 diamond blocks", "32 diamond blocks", "10 diamond blocks", "5 diamond blocks"],
+    "answer": "5 diamond blocks",
+    "difficulty": "medium",
+    "category": "lore",
+    "source": "knowledge/lore/sahara-and-economy.md"
+  },
+  {
+    "id": "q019",
+    "question": "Who were the three members of The Architechs who built Sahara?",
+    "options": [
+      "Grian, Mumbo Jumbo, and Xisumavoid",
+      "Grian, Mumbo Jumbo, and Iskall85",
+      "Grian, TangoTek, and Iskall85",
+      "Mumbo Jumbo, TangoTek, and Iskall85"
+    ],
+    "answer": "Grian, Mumbo Jumbo, and Iskall85",
+    "difficulty": "medium",
+    "category": "lore",
+    "source": "knowledge/lore/sahara-and-economy.md"
+  },
+  {
+    "id": "q020",
+    "question": "Which faction in Season 6's civil war was led by Docm77?",
+    "options": ["G-Team", "Team S.T.A.R.", "The Resistance", "HEP"],
+    "answer": "Team S.T.A.R.",
+    "difficulty": "medium",
+    "category": "lore",
+    "source": "knowledge/lore/civil-war-season6.md"
+  },
+  {
+    "id": "q021",
+    "question": "What dramatic event ended Season 8?",
+    "options": [
+      "A server-wide TNT explosion",
+      "The moon crashed into the planet",
+      "A dragon destroyed the world",
+      "A meteor wiped out the shopping district"
+    ],
+    "answer": "The moon crashed into the planet",
+    "difficulty": "medium",
+    "category": "seasons",
+    "source": "knowledge/seasons/season-8.md"
+  },
+  {
+    "id": "q022",
+    "question": "Which two hermits joined as new members in Season 8?",
+    "options": [
+      "Skizzleman and SmallishBeans",
+      "GeminiTay and PearlescentMoon",
+      "Skizzleman and GeminiTay",
+      "PearlescentMoon and Skizzleman"
+    ],
+    "answer": "GeminiTay and PearlescentMoon",
+    "difficulty": "medium",
+    "category": "seasons",
+    "source": "knowledge/seasons/season-8.md"
+  },
+  {
+    "id": "q023",
+    "question": "Who joined to fix MumboJumbo's iron farm in Season 2 and never left?",
+    "options": ["EthosLab", "Iskall85", "TangoTek", "ImpulseSV"],
+    "answer": "TangoTek",
+    "difficulty": "medium",
+    "category": "hermits",
+    "source": "knowledge/hermits/tangotek.md"
+  },
+  {
+    "id": "q024",
+    "question": "Which season was Season 7's shopping district nicknamed 'Cowmercial District'?",
+    "options": ["Season 6", "Season 7", "Season 8", "Season 9"],
+    "answer": "Season 7",
+    "difficulty": "medium",
+    "category": "lore",
+    "source": "knowledge/lore/sahara-and-economy.md"
+  },
+  {
+    "id": "q025",
+    "question": "Who were the arms dealers in Season 6's civil war, selling to both sides?",
+    "options": [
+      "EthosLab and VintageBeef",
+      "GoodTimesWithScar and Cubfan135",
+      "BdoubleO100 and Keralis",
+      "ZombieCleo and JoeHills"
+    ],
+    "answer": "GoodTimesWithScar and Cubfan135",
+    "difficulty": "medium",
+    "category": "lore",
+    "source": "knowledge/lore/civil-war-season6.md"
+  },
+  {
+    "id": "q026",
+    "question": "Which season used the Fabric mod loader?",
+    "options": ["Season 7", "Season 8", "Season 9", "Season 10"],
+    "answer": "Season 9",
+    "difficulty": "medium",
+    "category": "seasons",
+    "source": "knowledge/seasons/season-9.md"
+  },
+  {
+    "id": "q027",
+    "question": "Which two hermits joined as new members in Season 10?",
+    "options": [
+      "GeminiTay and PearlescentMoon",
+      "Skizzleman and SmallishBeans",
+      "Skizzleman and GeminiTay",
+      "SmallishBeans and PearlescentMoon"
+    ],
+    "answer": "Skizzleman and SmallishBeans",
+    "difficulty": "medium",
+    "category": "seasons",
+    "source": "knowledge/seasons/season-10.md"
+  },
+  {
+    "id": "q028",
+    "question": "Which season was the first to have zero roster changes?",
+    "options": ["Season 6", "Season 7", "Season 8", "Season 9"],
+    "answer": "Season 7",
+    "difficulty": "medium",
+    "category": "seasons",
+    "source": "knowledge/seasons/season-7.md"
+  },
+  {
+    "id": "q029",
+    "question": "How many seasons had TangoTek participated in through Season 11?",
+    "options": ["8", "9", "10", "11"],
+    "answer": "10",
+    "difficulty": "medium",
+    "category": "hermits",
+    "source": "knowledge/hermits/tangotek.md"
+  },
+  {
+    "id": "q030",
+    "question": "Which group did Grian, MumboJumbo, GoodTimesWithScar, ImpulseSV, and PearlescentMoon form in Season 8?",
+    "options": ["The Resistance", "The Buttercups", "Boatem", "The Soup Group"],
+    "answer": "Boatem",
+    "difficulty": "medium",
+    "category": "lore",
+    "source": "knowledge/lore/boatem-season8.md"
+  },
+  {
+    "id": "q031",
+    "question": "On what exact date was the Hermitcraft server founded?",
+    "options": ["April 1, 2012", "April 13, 2012", "June 9, 2012", "August 9, 2012"],
+    "answer": "April 13, 2012",
+    "difficulty": "hard",
+    "category": "seasons",
+    "source": "knowledge/seasons/season-1.md"
+  },
+  {
+    "id": "q032",
+    "question": "On what date did BdoubleO100 join during Season 1?",
+    "options": ["October 5, 2012", "January 5, 2013", "March 5, 2013", "June 9, 2013"],
+    "answer": "January 5, 2013",
+    "difficulty": "hard",
+    "category": "hermits",
+    "source": "knowledge/seasons/season-1.md"
+  },
+  {
+    "id": "q033",
+    "question": "What is Grian's real name?",
+    "options": ["George Bennett", "Charles Batchelor", "Oliver Brotherhood", "Jack Hughes"],
+    "answer": "Charles Batchelor",
+    "difficulty": "hard",
+    "category": "hermits",
+    "source": "knowledge/hermits/grian.md"
+  },
+  {
+    "id": "q034",
+    "question": "What is MumboJumbo's real name?",
+    "options": ["Jack Murphy", "Charles Batchelor", "Oliver Brotherhood", "Simon Clarke"],
+    "answer": "Oliver Brotherhood",
+    "difficulty": "hard",
+    "category": "hermits",
+    "source": "knowledge/hermits/mumbo-jumbo.md"
+  },
+  {
+    "id": "q035",
+    "question": "What is the Season 7 server seed?",
+    "options": ["-2143500864", "-7381235180058670651", "1409558884499", "42069420"],
+    "answer": "-2143500864",
+    "difficulty": "hard",
+    "category": "seasons",
+    "source": "knowledge/seasons/season-7.md"
+  },
+  {
+    "id": "q036",
+    "question": "What is the Season 8 server seed?",
+    "options": ["-2143500864", "-7381235180058670651", "8675309", "-42000000000"],
+    "answer": "-7381235180058670651",
+    "difficulty": "hard",
+    "category": "seasons",
+    "source": "knowledge/seasons/season-8.md"
+  },
+  {
+    "id": "q037",
+    "question": "What was the space tax rule in Season 7's shopping district?",
+    "options": [
+      "1 gold block per 64 blocks",
+      "1 diamond block per 100 blocks (10x10 area)",
+      "1 emerald block per 50 blocks",
+      "1 diamond per 25 blocks"
+    ],
+    "answer": "1 diamond block per 100 blocks (10x10 area)",
+    "difficulty": "hard",
+    "category": "lore",
+    "source": "knowledge/lore/sahara-and-economy.md"
+  },
+  {
+    "id": "q038",
+    "question": "Which Season 6 civil war faction member was MumboJumbo a double agent for?",
+    "options": [
+      "He spied for Team S.T.A.R. while on G-Team",
+      "He spied for G-Team while officially on Team S.T.A.R.",
+      "He was a neutral arms dealer",
+      "He switched factions mid-war officially"
+    ],
+    "answer": "He spied for G-Team while officially on Team S.T.A.R.",
+    "difficulty": "hard",
+    "category": "lore",
+    "source": "knowledge/lore/civil-war-season6.md"
+  },
+  {
+    "id": "q039",
+    "question": "What caused the Season 6 civil war to start?",
+    "options": [
+      "A griefing incident in the shopping district",
+      "Iskall85 built a Grian statue with diorite bird droppings",
+      "Grian stole diamonds from Docm77",
+      "A prank war that escalated out of control"
+    ],
+    "answer": "Iskall85 built a Grian statue with diorite bird droppings",
+    "difficulty": "hard",
+    "category": "lore",
+    "source": "knowledge/lore/civil-war-season6.md"
+  },
+  {
+    "id": "q040",
+    "question": "What was the prize for ZombieCleo's Head Games event in Season 7?",
+    "options": ["128 diamonds", "200 diamonds", "288 diamonds", "300 diamonds"],
+    "answer": "288 diamonds",
+    "difficulty": "hard",
+    "category": "lore",
+    "source": "knowledge/lore/sahara-and-economy.md"
+  },
+  {
+    "id": "q041",
+    "question": "What was the title of MumboJumbo's first Hermitcraft video?",
+    "options": [
+      "\"Welcome to Hermitcraft\"",
+      "\"HermitCraft: Episode 0 - Welcome Home\"",
+      "\"My First Day on Hermitcraft\"",
+      "\"HermitCraft - The Beginning\""
+    ],
+    "answer": "\"HermitCraft: Episode 0 - Welcome Home\"",
+    "difficulty": "hard",
+    "category": "hermits",
+    "source": "knowledge/hermits/mumbo-jumbo.md"
+  },
+  {
+    "id": "q042",
+    "question": "In which episode of Season 6 did Poultry Man first appear?",
+    "options": ["Episode 10", "Episode 15", "Episode 22", "Episode 30"],
+    "answer": "Episode 22",
+    "difficulty": "hard",
+    "category": "lore",
+    "source": "knowledge/lore/in-jokes-and-memes.md"
+  },
+  {
+    "id": "q043",
+    "question": "How long did TangoTek spend building Decked Out 2 in Season 9?",
+    "options": ["6 months", "8 months", "11+ months", "Over 2 years"],
+    "answer": "11+ months",
+    "difficulty": "hard",
+    "category": "lore",
+    "source": "knowledge/seasons/season-9.md"
+  },
+  {
+    "id": "q044",
+    "question": "What group did Zedaph, ImpulseSV, TangoTek, and Skizzleman form in Season 10?",
+    "options": ["The Soup Group", "Boatem", "ZITS", "The Buttercups"],
+    "answer": "ZITS",
+    "difficulty": "hard",
+    "category": "lore",
+    "source": "knowledge/seasons/season-10.md"
+  },
+  {
+    "id": "q045",
+    "question": "What prime factor of the Season 6 server seed did JoeHills reveal publicly?",
+    "options": ["1,234,567,891", "1,409,558,884,499", "2,147,483,647", "9,999,999,999,999"],
+    "answer": "1,409,558,884,499",
+    "difficulty": "hard",
+    "category": "seasons",
+    "source": "knowledge/seasons/season-6.md"
+  },
+  {
+    "id": "q046",
+    "question": "What prize did FalseSymmetry receive for winning Demise in Season 10?",
+    "options": [
+      "64 diamond blocks",
+      "The Wither trophy",
+      "Joker Permit to sell any item",
+      "A dedicated shop plot"
+    ],
+    "answer": "Joker Permit to sell any item",
+    "difficulty": "hard",
+    "category": "lore",
+    "source": "knowledge/lore/demise.md"
+  },
+  {
+    "id": "q047",
+    "question": "How was FalseSymmetry ceremonially eliminated at the end of Demise in Season 10?",
+    "options": [
+      "Pushed into lava by Grian",
+      "Simultaneous dispensers fired by MumboJumbo, Xisumavoid, StressMonster101, and xBCrafted",
+      "Blown up by a creeper farm",
+      "Fell into the void"
+    ],
+    "answer": "Simultaneous dispensers fired by MumboJumbo, Xisumavoid, StressMonster101, and xBCrafted",
+    "difficulty": "hard",
+    "category": "lore",
+    "source": "knowledge/lore/demise.md"
+  },
+  {
+    "id": "q048",
+    "question": "What exact date did Season 7 begin?",
+    "options": ["January 1, 2020", "February 28, 2020", "March 15, 2020", "April 5, 2020"],
+    "answer": "February 28, 2020",
+    "difficulty": "hard",
+    "category": "seasons",
+    "source": "knowledge/seasons/season-7.md"
+  },
+  {
+    "id": "q049",
+    "question": "Which strategy did the Mycelium Resistance use to spread mycelium naturally?",
+    "options": [
+      "Placing mycelium blocks at night",
+      "Using endermen to carry mycelium",
+      "Breeding sheep that walked over mycelium",
+      "Converting grass blocks with water"
+    ],
+    "answer": "Breeding sheep that walked over mycelium",
+    "difficulty": "hard",
+    "category": "lore",
+    "source": "knowledge/lore/mycelium-resistance-season7.md"
+  },
+  {
+    "id": "q050",
+    "question": "How many total members were there at the end of Season 1 (full roster count)?",
+    "options": ["10", "15", "22", "29"],
+    "answer": "29",
+    "difficulty": "hard",
+    "category": "seasons",
+    "source": "knowledge/seasons/season-1.md"
+  },
+  {
+    "id": "q051",
+    "question": "Who co-founded Wynncraft, the largest MMORPG built in Minecraft?",
+    "options": ["Mumbo Jumbo", "Xisumavoid", "Grian", "TangoTek"],
+    "answer": "Grian",
+    "difficulty": "hard",
+    "category": "hermits",
+    "source": "knowledge/hermits/grian.md"
+  },
+  {
+    "id": "q052",
+    "question": "What group formed by GoodTimesWithScar, Grian, Cubfan135, and Skizzleman in Season 10?",
+    "options": ["ZITS", "The Soup Group", "Poe-Poe", "The Buttercups"],
+    "answer": "Poe-Poe",
+    "difficulty": "hard",
+    "category": "lore",
+    "source": "knowledge/seasons/season-10.md"
+  },
+  {
+    "id": "q053",
+    "question": "What is ImpulseSV's birth date?",
+    "options": ["March 9, 1979", "March 9, 1981", "August 9, 1993", "October 15, 1985"],
+    "answer": "March 9, 1981",
+    "difficulty": "hard",
+    "category": "hermits",
+    "source": "knowledge/hermits/impulsesv.md"
+  },
+  {
+    "id": "q054",
+    "question": "What was the name of the group formed by ImpulseSV, PearlescentMoon, and GeminiTay in Season 9?",
+    "options": ["Boatem", "The Soup Group", "ZITS", "Team JOLTS"],
+    "answer": "The Soup Group",
+    "difficulty": "hard",
+    "category": "lore",
+    "source": "knowledge/seasons/season-9.md"
+  },
+  {
+    "id": "q055",
+    "question": "What Minecraft version was Season 8 built on?",
+    "options": ["1.16.x", "1.17 (Caves & Cliffs Part 1)", "1.18.1", "1.19.x"],
+    "answer": "1.17 (Caves & Cliffs Part 1)",
+    "difficulty": "hard",
+    "category": "seasons",
+    "source": "knowledge/seasons/season-8.md"
+  }
+]
