@@ -39,6 +39,7 @@ import argparse
 import collections
 import itertools
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -538,7 +539,12 @@ def _discord_peak_value(peak: dict) -> str:
 
     parts = [header, meta]
     if desc:
-        # Trim description to fit remaining budget in the field
+        # Trim description to fit the remaining character budget.
+        # Note: if header + meta already exceed the field limit, budget goes
+        # negative and the description is simply skipped (budget ≤ 40 guard).
+        # The caller always wraps the return value in _truncate(...,
+        # _DISCORD_FIELD_VALUE_LIMIT) as a final clamp, so the hard limit is
+        # always honoured regardless.
         budget = _DISCORD_FIELD_VALUE_LIMIT - len(header) - len(meta) - 4
         if budget > 40:
             parts.append(_truncate(desc, budget))
@@ -546,9 +552,14 @@ def _discord_peak_value(peak: dict) -> str:
     return "\n".join(p for p in parts if p)
 
 
-def _discord_highlights_value(highlights: list[dict]) -> str:
-    """Numbered list of highlights, truncated to fit the field limit."""
+def _discord_highlights_value(highlights: list[dict]) -> tuple[str, int]:
+    """Numbered list of highlights, truncated to fit the field limit.
+
+    Returns a ``(text, rendered_count)`` tuple so callers can label the field
+    accurately even when the list is cut short by the character budget.
+    """
     lines: list[str] = []
+    rendered_count = 0
     for entry in highlights:
         rank = entry["rank"]
         title = entry["title"]
@@ -559,10 +570,12 @@ def _discord_highlights_value(highlights: list[dict]) -> str:
         # Add line only while we stay within the limit
         candidate = "\n".join(lines + [line])
         if len(candidate) > _DISCORD_FIELD_VALUE_LIMIT - 4:
-            lines.append(" …")
+            lines.append(" …")  # sentinel — not counted as a rendered entry
             break
         lines.append(line)
-    return "\n".join(lines) if lines else "*No highlights available.*"
+        rendered_count += 1  # only real entries count
+    text = "\n".join(lines) if lines else "*No highlights available.*"
+    return text, rendered_count
 
 
 def _discord_collabs_value(collabs: list[dict]) -> str:
@@ -625,9 +638,15 @@ def build_discord_embed(digest: dict) -> dict:
     )
     colour = _SEASON_COLOURS.get(season, _COLOUR_DEFAULT)
 
-    # Arc: trim to 2 sentences for embed brevity
-    arc_sentences = [s.strip() for s in arc.split(".") if s.strip()]
-    arc_short = ". ".join(arc_sentences[:2]) + ("." if arc_sentences else "")
+    # Arc: trim to 2 sentences for embed brevity.
+    # Use a lookbehind on sentence-ending punctuation + whitespace so that
+    # abbreviations (e.g. "1.16.2") and version numbers don't cause false splits.
+    arc_sentences = [
+        s.strip()
+        for s in re.split(r"(?<=[.!?])\s+", arc)
+        if s.strip()
+    ]
+    arc_short = " ".join(arc_sentences[:2])
     arc_value = _truncate(arc_short, _DISCORD_FIELD_VALUE_LIMIT)
 
     fields: list[dict] = [
@@ -655,10 +674,13 @@ def build_discord_embed(digest: dict) -> dict:
         )
 
     if highlights:
+        highlights_text, rendered_count = _discord_highlights_value(highlights)
         fields.append(
             {
-                "name": f"🏅 Top {len(highlights)} Highlights",
-                "value": _discord_highlights_value(highlights),
+                # Use the *rendered* count, not len(highlights), so the label
+                # stays accurate when the character budget truncates the list.
+                "name": f"🏅 Top {rendered_count} Highlights",
+                "value": highlights_text,
                 "inline": False,
             }
         )
@@ -699,6 +721,15 @@ def build_discord_embed(digest: dict) -> dict:
                 longest["value"],
                 len(longest["value"]) - 100,
             )
+
+    # Last resort: if the embed still exceeds the limit after all fields are
+    # stripped (pathological case), clamp the title to the exact remaining
+    # budget.  Subtract the *current* char count minus the title length so that
+    # every other element (footer, any surviving fields, etc.) is accounted for.
+    if _embed_char_count(embed) > _DISCORD_EMBED_TOTAL_LIMIT:
+        current_without_title = _embed_char_count(embed) - len(embed.get("title", ""))
+        remaining = _DISCORD_EMBED_TOTAL_LIMIT - current_without_title
+        embed["title"] = _truncate(embed["title"], max(10, remaining))
 
     return embed
 
