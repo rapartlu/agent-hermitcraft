@@ -38,6 +38,30 @@ This is a self-learning Hermitcraft knowledge agent. You (Claude) are the agent.
 - Use markdown for knowledge files.
 - Keep data machine-readable where practical (YAML frontmatter in markdown files).
 
+## GitHub API Calls — Rate-Limit Guardrail
+
+**Any tool that shells out to the `gh` CLI must use `run_with_retry` from
+`tools/api_retry` instead of calling `subprocess.run` directly.**
+
+```python
+# ✅ correct
+from tools.api_retry import run_with_retry
+rc, stdout, stderr = run_with_retry(["gh", "api", "repos/..."])
+
+# ❌ wrong — bypasses retry logic, will fail hard on rate limits
+import subprocess
+result = subprocess.run(["gh", "api", "repos/..."], capture_output=True)
+```
+
+`run_with_retry` transparently retries HTTP 429 / rate-limit responses up to
+5 times with exponential backoff (1 s → 2 s → 4 s → 8 s → 16 s, cap 30 s)
+and logs each retry attempt to stderr.
+
+A repo integrity test (`tests/test_no_bare_gh_subprocess.py`) enforces this
+rule automatically — it will fail if any `tools/*.py` file (other than
+`api_retry.py` itself) contains a bare `subprocess.run` call whose first
+argument list starts with `"gh"`.
+
 ## Commit Messages
 
 - Use conventional commits: `feat:`, `fix:`, `docs:`, `research:`, `chore:`
