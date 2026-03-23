@@ -10,7 +10,7 @@ Usage:
 Exit codes:
     0  — fixable, agent should retry
     1  — infrastructure-blocked, escalate to orchestrator
-    2  — unexpected error
+    2  — unexpected error (argparse failure, bad input, etc.)
 """
 
 import argparse
@@ -109,24 +109,31 @@ def build_routing_message(task_id: str, score: float, notes: str) -> str:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Classify a verifier rejection.")
-    parser.add_argument("--task-id", default="UNKNOWN", help="Task ID")
-    parser.add_argument("--score", type=float, required=True, help="Verifier score (0.0-1.0)")
-    parser.add_argument("--notes", required=True, help="Verification notes / rejection reason")
-    parser.add_argument("--json", action="store_true", dest="as_json", help="Output as JSON")
-    args = parser.parse_args()
+    try:
+        parser = argparse.ArgumentParser(description="Classify a verifier rejection.")
+        parser.add_argument("--task-id", default="UNKNOWN", help="Task ID")
+        parser.add_argument("--score", type=float, required=True, help="Verifier score (0.0-1.0)")
+        parser.add_argument("--notes", required=True, help="Verification notes / rejection reason")
+        parser.add_argument("--json", action="store_true", dest="as_json", help="Output as JSON")
+        args = parser.parse_args()
 
-    result = classify(args.score, args.notes)
-    result["task_id"] = args.task_id
-    result["score"] = args.score
+        result = classify(args.score, args.notes)
+        result["task_id"] = args.task_id
+        result["score"] = args.score
 
-    if args.as_json:
-        print(json.dumps(result, indent=2))
-    else:
-        print(build_routing_message(args.task_id, args.score, args.notes))
+        if args.as_json:
+            print(json.dumps(result, indent=2))
+        else:
+            print(build_routing_message(args.task_id, args.score, args.notes))
 
-    # Exit 1 if infrastructure-blocked so callers can branch on exit code
-    sys.exit(1 if result["classification"] == "infrastructure-blocked" else 0)
+        # Exit 1 if infrastructure-blocked so callers can branch on exit code
+        sys.exit(1 if result["classification"] == "infrastructure-blocked" else 0)
+    except SystemExit:
+        # Re-raise SystemExit (from sys.exit and argparse --help/errors) unchanged
+        raise
+    except Exception as exc:
+        print(f"[rejection_classifier] unexpected error: {exc}", file=sys.stderr)
+        sys.exit(2)
 
 
 if __name__ == "__main__":

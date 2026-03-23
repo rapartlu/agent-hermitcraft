@@ -29,7 +29,7 @@ Do **not** redispatch the task — it will fail again for the same reason.
 
 ### Fixable (dispatch revision guidance to agent)
 
-Escalate if the notes describe:
+Classify as fixable (dispatch revision guidance) if the notes describe:
 
 - Wrong content (incorrect facts, missing sections, outdated data)
 - Formatting / structure errors (YAML frontmatter invalid, markdown broken)
