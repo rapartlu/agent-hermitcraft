@@ -243,6 +243,28 @@ def filter_timeline_by_month(events: list[dict], month: int) -> list[dict]:
     return filtered
 
 
+def filter_by_hermit(events: list[dict], hermit_name: str) -> list[dict]:
+    """
+    Return only those *events* that involve *hermit_name*.
+
+    An event matches when:
+    * ``event["hermits"]`` equals ``["All"]`` (server-wide events), OR
+    * *hermit_name* appears in ``event["hermits"]`` (case-insensitive).
+
+    An empty hermit list does **not** match, since the event's participants
+    are genuinely unknown.
+    """
+    name_lower = hermit_name.lower()
+    result = []
+    for ev in events:
+        hermits: list = ev.get("hermits", [])
+        if hermits == ["All"]:
+            result.append(ev)
+        elif any(h.lower() == name_lower for h in hermits):
+            result.append(ev)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Recap assembler
 # ---------------------------------------------------------------------------
@@ -443,19 +465,21 @@ def format_timeline_text(
     season: int,
     events: list[dict],
     month: int | None = None,
+    hermit: str | None = None,
 ) -> str:
     """
     Return a human-readable chronological timeline for *season*.
 
     Each event line shows: date, hermit(s), title.
     A description block follows each entry.
-    *month*, if given, is used only in the header label.
+    *month* and *hermit*, if given, are used only in the header label.
     """
     lines: list[str] = []
 
     month_label = f" — {_MONTH_NAMES[month]}" if month and 1 <= month <= 12 else ""
+    hermit_label = f" — {hermit}" if hermit else ""
     lines.append(_hr("═"))
-    lines.append(f"  HERMITCRAFT SEASON {season} TIMELINE{month_label}")
+    lines.append(f"  HERMITCRAFT SEASON {season} TIMELINE{month_label}{hermit_label}")
     lines.append(_hr("═"))
 
     if not events:
@@ -546,6 +570,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Output only the chronological event timeline (no full recap)",
     )
     parser.add_argument(
+        "--hermit",
+        metavar="NAME",
+        help=(
+            "Filter timeline events to those involving a specific hermit. "
+            "Case-insensitive. Server-wide events (hermits=[All]) are always "
+            "included. Implies --timeline-only."
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         dest="as_json",
@@ -558,8 +591,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    # --month implies --timeline-only
-    if args.month is not None:
+    # --month and --hermit both imply --timeline-only
+    if args.month is not None or args.hermit is not None:
         args.timeline_only = True
 
     if args.list:
@@ -587,17 +620,22 @@ def main(argv: list[str] | None = None) -> int:
         events = load_events_for_season(season)
         if args.month is not None:
             events = filter_timeline_by_month(events, args.month)
+        if args.hermit is not None:
+            events = filter_by_hermit(events, args.hermit)
 
         if args.as_json:
             payload = {
                 "season": season,
                 "month": args.month,
+                "hermit": args.hermit,
                 "event_count": len(events),
                 "events": events,
             }
             print(json.dumps(payload, indent=2, ensure_ascii=False))
         else:
-            print(format_timeline_text(season, events, month=args.month))
+            print(format_timeline_text(
+                season, events, month=args.month, hermit=args.hermit
+            ))
         return 0
 
     # Full recap path

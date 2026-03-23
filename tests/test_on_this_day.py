@@ -18,6 +18,7 @@ from tools.on_this_day import (
     VIDEO_EVENTS_FILE,
     _infer_precision,
     _parse_frontmatter,
+    filter_by_hermit,
     find_on_this_day,
     load_events,
     load_hermit_profiles,
@@ -902,6 +903,147 @@ class TestVideoEventsCLI(unittest.TestCase):
             all_count = len(all_result.stdout.strip().splitlines())
             vid_count = len(vid_result.stdout.strip().splitlines())
             self.assertGreaterEqual(all_count, vid_count)
+
+
+# ---------------------------------------------------------------------------
+# TestFilterByHermit
+# ---------------------------------------------------------------------------
+
+class TestFilterByHermit(unittest.TestCase):
+    """Tests for filter_by_hermit()."""
+
+    EVENTS = [
+        _make_event(id="all-1",   hermits=["All"],             title="Server-wide event"),
+        _make_event(id="grian-1", hermits=["Grian"],           title="Grian solo event"),
+        _make_event(id="duo-1",   hermits=["Grian", "MumboJumbo"], title="Duo event"),
+        _make_event(id="tango-1", hermits=["TangoTek"],        title="TangoTek event"),
+        _make_event(id="empty-1", hermits=[],                  title="Unknown participants"),
+    ]
+
+    def test_all_event_always_included(self):
+        results = filter_by_hermit(self.EVENTS, "Grian")
+        ids = [e["id"] for e in results]
+        self.assertIn("all-1", ids)
+
+    def test_matching_hermit_included(self):
+        results = filter_by_hermit(self.EVENTS, "Grian")
+        ids = [e["id"] for e in results]
+        self.assertIn("grian-1", ids)
+
+    def test_multi_hermit_event_included(self):
+        results = filter_by_hermit(self.EVENTS, "Grian")
+        ids = [e["id"] for e in results]
+        self.assertIn("duo-1", ids)
+
+    def test_non_matching_hermit_excluded(self):
+        results = filter_by_hermit(self.EVENTS, "Grian")
+        ids = [e["id"] for e in results]
+        self.assertNotIn("tango-1", ids)
+
+    def test_empty_hermit_list_excluded(self):
+        results = filter_by_hermit(self.EVENTS, "Grian")
+        ids = [e["id"] for e in results]
+        self.assertNotIn("empty-1", ids)
+
+    def test_case_insensitive_match(self):
+        results_lower = filter_by_hermit(self.EVENTS, "grian")
+        results_upper = filter_by_hermit(self.EVENTS, "GRIAN")
+        results_mixed = filter_by_hermit(self.EVENTS, "Grian")
+        self.assertEqual([e["id"] for e in results_lower],
+                         [e["id"] for e in results_mixed])
+        self.assertEqual([e["id"] for e in results_upper],
+                         [e["id"] for e in results_mixed])
+
+    def test_no_match_returns_only_all_events(self):
+        results = filter_by_hermit(self.EVENTS, "ZombieCleo")
+        ids = [e["id"] for e in results]
+        self.assertEqual(ids, ["all-1"])
+
+    def test_empty_event_list(self):
+        self.assertEqual(filter_by_hermit([], "Grian"), [])
+
+    def test_tangotek_filter(self):
+        results = filter_by_hermit(self.EVENTS, "TangoTek")
+        ids = [e["id"] for e in results]
+        self.assertIn("tango-1", ids)
+        self.assertIn("all-1", ids)
+        self.assertNotIn("grian-1", ids)
+
+
+class TestFilterByHermitCLI(unittest.TestCase):
+    """CLI tests for the --hermit flag in on_this_day."""
+
+    SCRIPT = str(ROOT / "tools" / "on_this_day.py")
+
+    def _run(self, *args: str):
+        return subprocess.run(
+            [sys.executable, self.SCRIPT, *args],
+            capture_output=True, text=True,
+        )
+
+    def test_hermit_flag_exits_0_when_events_found(self):
+        # April 13 has server-wide "All" events that always match any hermit
+        result = self._run(
+            "--month", "4", "--day", "13",
+            "--include-year", "--hermit", "Generikb",
+        )
+        self.assertEqual(result.returncode, 0)
+
+    def test_hermit_filter_output_only_relevant_events(self):
+        result = self._run(
+            "--month", "4", "--day", "13",
+            "--all-events", "--hermit", "Generikb", "--pretty",
+        )
+        self.assertEqual(result.returncode, 0)
+        events = json.loads(result.stdout)
+        for ev in events:
+            hermits = ev.get("hermits", [])
+            self.assertTrue(
+                hermits == ["All"]
+                or any(h.lower() == "generikb" for h in hermits),
+                f"Event includes unexpected hermit list: {hermits}",
+            )
+
+    def test_hermit_case_insensitive_cli(self):
+        result_lower = self._run(
+            "--month", "4", "--day", "13",
+            "--all-events", "--hermit", "generikb", "--pretty",
+        )
+        result_proper = self._run(
+            "--month", "4", "--day", "13",
+            "--all-events", "--hermit", "Generikb", "--pretty",
+        )
+        if result_lower.returncode == 0 and result_proper.returncode == 0:
+            self.assertEqual(
+                json.loads(result_lower.stdout),
+                json.loads(result_proper.stdout),
+            )
+
+    def test_hermit_filter_only_returns_relevant_events(self):
+        # Every returned event must either be ["All"] or mention the hermit
+        result = self._run(
+            "--month", "4", "--day", "13",
+            "--include-year", "--hermit", "ZombieCleo", "--pretty",
+        )
+        if result.returncode == 0:
+            events = json.loads(result.stdout)
+            for ev in events:
+                hermits = ev.get("hermits", [])
+                self.assertTrue(
+                    hermits == ["All"]
+                    or any(h.lower() == "zombiecleo" for h in hermits),
+                    f"Unexpected hermit list for ZombieCleo filter: {hermits}",
+                )
+
+    def test_hermit_flag_does_not_affect_ndjson_format(self):
+        result = self._run(
+            "--month", "4", "--day", "13",
+            "--include-year", "--hermit", "Generikb",
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().splitlines():
+                obj = json.loads(line)
+                self.assertIn("id", obj)
 
 
 if __name__ == "__main__":
