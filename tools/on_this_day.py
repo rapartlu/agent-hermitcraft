@@ -14,7 +14,7 @@ Usage
   python3 tools/on_this_day.py --all-events                       # enable all event sources (recommended)
   python3 tools/on_this_day.py --no-approximate              # exclude approximate-precision events
   python3 tools/on_this_day.py --include-year                # include year-only events
-  python3 tools/on_this_day.py --include-hermit-anniversaries  # add hermit join/YT anniversaries
+  python3 tools/on_this_day.py --include-hermit-anniversaries  # add hermit join/YT/subscriber anniversaries
   python3 tools/on_this_day.py --pretty                      # indented JSON array output
 
 Date precision handling
@@ -173,11 +173,17 @@ def find_on_this_day(
     return sorted(results, key=sort_key)
 
 
-def _parse_frontmatter(content: str) -> dict[str, str]:
+def _parse_frontmatter(content: str) -> dict:
     """
-    Extract flat scalar fields from YAML frontmatter delimited by ``---``.
+    Extract fields from YAML frontmatter delimited by ``---``.
 
-    Only handles simple ``key: value`` lines (no lists, no nested mappings).
+    Handles:
+    * Simple ``key: value`` scalar lines.
+    * Inline list-of-dicts for ``subscriber_milestones``, e.g.::
+
+        subscriber_milestones:
+          - { date: "2019-03", count: "5M" }
+
     Quoted values have their surrounding quotes stripped.
     """
     if not content.startswith("---"):
@@ -186,17 +192,45 @@ def _parse_frontmatter(content: str) -> dict[str, str]:
     if end == -1:
         return {}
     fm_text = content[4:end]
-    result: dict[str, str] = {}
+    result: dict = {}
+    current_list_key: str | None = None
     for line in fm_text.splitlines():
-        # Skip list items, indented lines, and blank lines
-        if not line or line.startswith(" ") or line.startswith("-"):
+        # Blank line — reset list context
+        if not line.strip():
+            current_list_key = None
             continue
+
+        # Indented list item under a known list key
+        if line.startswith("  ") or line.startswith("\t"):
+            stripped = line.strip()
+            if current_list_key and stripped.startswith("- {") and stripped.endswith("}"):
+                # Parse inline dict: - { key: "val", key2: "val2" }
+                inner = stripped[2:].strip().lstrip("{").rstrip("}")
+                item: dict[str, str] = {}
+                for pair in inner.split(","):
+                    pair = pair.strip()
+                    if ":" not in pair:
+                        continue
+                    k, _, v = pair.partition(":")
+                    item[k.strip()] = v.strip().strip('"').strip("'")
+                if item:
+                    result.setdefault(current_list_key, []).append(item)
+            continue
+
+        # Top-level list header (``key:`` with no value)
         if ":" not in line:
+            current_list_key = None
             continue
+
         key, _, raw_value = line.partition(":")
         value = raw_value.strip().strip('"').strip("'")
         if value:
+            current_list_key = None
             result[key.strip()] = value
+        else:
+            # No value → could be a list header
+            current_list_key = key.strip()
+
     return result
 
 
@@ -230,12 +264,14 @@ def load_hermit_profiles(directory: Path = HERMITS_DIR) -> list[dict[str, str]]:
     return profiles
 
 
-def synthesise_hermit_events(profiles: list[dict[str, str]]) -> list[dict]:
+def synthesise_hermit_events(profiles: list[dict]) -> list[dict]:
     """
     Build virtual event dicts from hermit profile frontmatter fields:
 
-    * ``join_date``         → "``{Name}`` Joins Hermitcraft" milestone
-    * ``yt_channel_start``  → "``{Name}`` Starts YouTube Channel" milestone
+    * ``join_date``              → "``{Name}`` Joins Hermitcraft" milestone
+    * ``yt_channel_start``       → "``{Name}`` Starts YouTube Channel" milestone
+    * ``subscriber_milestones``  → "``{Name}`` Reaches {count} Subscribers" milestone
+                                   (one event per entry in the list)
 
     Synthesised events carry ``"source": "hermit_profile"`` so callers can
     distinguish them from timeline data.
@@ -287,6 +323,31 @@ def synthesise_hermit_events(profiles: list[dict[str, str]]) -> list[dict]:
                 "source": "hermit_profile",
             })
 
+        sub_milestones = fm.get("subscriber_milestones", [])
+        if isinstance(sub_milestones, list):
+            for entry in sub_milestones:
+                if not isinstance(entry, dict):
+                    continue
+                ms_date = entry.get("date", "")
+                ms_count = entry.get("count", "")
+                if not ms_date or not ms_count:
+                    continue
+                precision = _infer_precision(ms_date)
+                count_slug = re.sub(r"[^a-z0-9]", "", ms_count.lower())
+                events.append({
+                    "id": f"hermit-{slug}-subs-{count_slug}",
+                    "date": ms_date,
+                    "date_precision": precision,
+                    "season": 0,
+                    "hermits": [name],
+                    "type": "milestone",
+                    "title": f"{name} Reaches {ms_count} Subscribers",
+                    "description": (
+                        f"{name} reaches {ms_count} subscribers on YouTube ({ms_date})."
+                    ),
+                    "source": "hermit_profile",
+                })
+
     return events
 
 
@@ -320,8 +381,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--include-hermit-anniversaries", action="store_true", default=False,
         help=(
-            "Synthesise hermit join and YouTube-channel anniversary events "
-            "from hermit profiles and include them in results."
+            "Synthesise hermit join, YouTube-channel, and subscriber-milestone "
+            "anniversary events from hermit profiles and include them in results."
         ),
     )
     parser.add_argument(

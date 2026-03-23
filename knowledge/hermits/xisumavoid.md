@@ -16,6 +16,10 @@ specialties:
   - bees/honey builds
   - technical minecraft
 seasons: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+subscriber_milestones:
+  - { date: "2017-06", count: "500K" }
+  - { date: "2020-03", count: "1M" }
+  - { date: "2023-05", count: "1.5M" }
 ---
 
 # Xisumavoid
