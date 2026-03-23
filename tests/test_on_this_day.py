@@ -328,11 +328,15 @@ class TestCLI(unittest.TestCase):
         self.assertIn("year", precisions)
 
     def test_exclude_approximate_flag(self):
-        r = self._run(["--month", "4", "--day", "13", "--no-approximate"])
-        if r.returncode == 0:
-            events = [json.loads(line) for line in r.stdout.strip().splitlines()]
-            for e in events:
-                self.assertNotEqual(e.get("date_precision"), "approximate")
+        # April 13, window=0: s1-001 and s1-002 are "day" precision so they
+        # are always returned; s5-001/s5-002 are "approximate" and must be
+        # absent.  We use window=0 so only exact-day matches are possible,
+        # guaranteeing at least two "day" results independent of --no-approximate.
+        r = self._run(["--month", "4", "--day", "13", "--window", "0", "--no-approximate"])
+        self.assertEqual(r.returncode, 0, f"Expected results even without approximates; stderr: {r.stderr}")
+        events = [json.loads(line) for line in r.stdout.strip().splitlines()]
+        for e in events:
+            self.assertNotEqual(e.get("date_precision"), "approximate")
 
     def test_narrow_window_zero(self):
         r = self._run(["--month", "4", "--day", "13", "--window", "0"])

@@ -11,7 +11,7 @@ Usage
   python3 tools/on_this_day.py --month 4 --day 13       # April 13 (server founding!)
   python3 tools/on_this_day.py --month 6 --day 17       # June 17 (Season 7 launch)
   python3 tools/on_this_day.py --window 3               # ±3 day window (default 7)
-  python3 tools/on_this_day.py --include-approximate    # include approximate-precision events
+  python3 tools/on_this_day.py --no-approximate         # exclude approximate-precision events
   python3 tools/on_this_day.py --include-year           # include year-only events
   python3 tools/on_this_day.py --pretty                 # indented JSON array output
 
@@ -78,13 +78,14 @@ def _parse_event_date(event: dict) -> tuple[int | None, int | None, int | None]:
 
 
 def _day_of_year(month: int, day: int, leap: bool = False) -> int:
-    """Return the day-of-year (1-based) for a given month/day."""
-    try:
-        # Use a known leap or non-leap year for calculation
-        year = 2000 if leap else 2001
-        return date(year, month, day).timetuple().tm_yday
-    except ValueError:
-        return 0
+    """Return the day-of-year (1-based) for a given month/day.
+
+    Raises ValueError for invalid month/day combinations (e.g. month=13,
+    day=32, or Feb 30) so callers can decide how to handle bad data.
+    """
+    # Use a known leap or non-leap year for calculation
+    year = 2000 if leap else 2001
+    return date(year, month, day).timetuple().tm_yday
 
 
 def _circular_distance(doy_a: int, doy_b: int, year_len: int = 365) -> int:
@@ -122,16 +123,16 @@ def matches_on_this_day(
     if month is None or day is None:
         return False
 
-    # Clamp Feb 29 to Feb 28 when comparing against non-leap years
     try:
         event_doy = _day_of_year(month, day)
     except ValueError:
-        # Invalid date in data — skip
+        # Malformed date in event data (e.g. month=13 or Feb 30) — skip
         return False
 
     try:
         target_doy = _day_of_year(target_month, target_day)
     except ValueError:
+        # Invalid target date — skip (main() validates this before calling)
         return False
 
     return _circular_distance(event_doy, target_doy) <= window
@@ -206,9 +207,12 @@ def main(argv: list[str] | None = None) -> int:
     target_month = args.month if args.month is not None else today.month
     target_day = args.day if args.day is not None else today.day
 
-    # Validate month/day
+    # Validate month/day using a non-leap year so that Feb 29 is rejected
+    # with a clear error. This is intentional: Feb 29 only exists in leap
+    # years so a "day of year" comparison against non-leap event dates would
+    # be ambiguous. Users can query Feb 28 or Mar 1 instead.
     try:
-        date(2001, target_month, target_day)  # non-leap year to catch Feb 29
+        date(2001, target_month, target_day)
     except ValueError as exc:
         sys.stderr.write(f"[on_this_day] invalid date: {exc}\n")
         return 2
