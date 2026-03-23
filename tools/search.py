@@ -13,6 +13,9 @@ Usage
   python3 tools/search.py --query "Decked Out" --season 7
   python3 tools/search.py --query "redstone" --sources events hermits
   python3 tools/search.py --query "mycelium" --limit 5
+  python3 tools/search.py --query "base" --hermit Grian
+  python3 tools/search.py --query "war" --type collab
+  python3 tools/search.py --query "build" --season 9 --hermit TangoTek --type build
 
 Sources searched (default: all)
 ---------------------------------
@@ -142,12 +145,23 @@ def _strip_frontmatter(content: str) -> str:
 # Per-source search functions
 # ---------------------------------------------------------------------------
 
-def search_events(tokens: list[str], season_filter: int | None = None) -> list[dict]:
+def search_events(
+    tokens: list[str],
+    season_filter: int | None = None,
+    hermit_filter: str | None = None,
+    type_filter: str | None = None,
+) -> list[dict]:
     """
     Search ``events.json`` and ``video_events.json`` for *tokens*.
 
     Each matching event becomes one result dict with keys:
     source, score, season, hermits, id, title, snippet, date, type.
+
+    Optional filters (applied before scoring):
+    - *season_filter*  restrict to a specific season number
+    - *hermit_filter*  restrict to events involving a named hermit
+                       (case-insensitive substring match against hermit list)
+    - *type_filter*    restrict to a specific event type (exact, case-insensitive)
     """
     all_events: list[dict] = []
     for path in (EVENTS_FILE, VIDEO_EVENTS_FILE):
@@ -157,11 +171,24 @@ def search_events(tokens: list[str], season_filter: int | None = None) -> list[d
             except (json.JSONDecodeError, OSError):
                 pass
 
+    hermit_lower = hermit_filter.lower() if hermit_filter else None
+    type_lower = type_filter.lower() if type_filter else None
+
     results = []
     for ev in all_events:
         season = ev.get("season")
         if season_filter is not None and season != season_filter:
             continue
+
+        ev_type = ev.get("type", "")
+        if type_lower is not None and ev_type.lower() != type_lower:
+            continue
+
+        ev_hermits: list[str] = ev.get("hermits", [])
+        if hermit_lower is not None:
+            if not any(hermit_lower in h.lower() for h in ev_hermits):
+                continue
+
         title = ev.get("title", "")
         body = ev.get("description", "")
         sc = score_result(tokens, title, body)
@@ -171,12 +198,12 @@ def search_events(tokens: list[str], season_filter: int | None = None) -> list[d
             "source": "event",
             "score": sc,
             "season": season,
-            "hermits": ev.get("hermits", []),
+            "hermits": ev_hermits,
             "id": ev.get("id", ""),
             "title": title,
             "snippet": make_snippet(body, tokens) if body else "",
             "date": ev.get("date", ""),
-            "type": ev.get("type", ""),
+            "type": ev_type,
         })
     return results
 
@@ -184,13 +211,26 @@ def search_events(tokens: list[str], season_filter: int | None = None) -> list[d
 def search_hermit_profiles(
     tokens: list[str],
     season_filter: int | None = None,
+    hermit_filter: str | None = None,
+    type_filter: str | None = None,
 ) -> list[dict]:
     """
     Search ``knowledge/hermits/*.md`` profile files for *tokens*.
 
     If *season_filter* is given, only include hermits who played in that season
     (checked via the ``seasons`` frontmatter list).
+
+    If *hermit_filter* is given, only include the profile whose name contains
+    the filter string (case-insensitive).
+
+    If *type_filter* is given and it is not ``"profile"``, skip all profiles.
     """
+    # Profiles have type="profile"; skip entirely if caller wants a different type
+    if type_filter is not None and type_filter.lower() != "profile":
+        return []
+
+    hermit_lower = hermit_filter.lower() if hermit_filter else None
+
     results = []
     for path in sorted(HERMITS_DIR.glob("*.md")):
         if path.name == "README.md":
@@ -202,6 +242,10 @@ def search_hermit_profiles(
 
         fm = _parse_frontmatter(content)
         name = fm.get("name", path.stem)
+
+        # Hermit filter: name contains the filter string
+        if hermit_lower is not None and hermit_lower not in name.lower():
+            continue
 
         # Season filter: parse the "seasons:" field as a bracketed list
         if season_filter is not None:
@@ -235,10 +279,23 @@ def search_hermit_profiles(
 def search_season_files(
     tokens: list[str],
     season_filter: int | None = None,
+    hermit_filter: str | None = None,
+    type_filter: str | None = None,
 ) -> list[dict]:
     """
     Search ``knowledge/seasons/season-N.md`` files for *tokens*.
+
+    If *hermit_filter* is given, only include seasons where that hermit is
+    mentioned in the Members section.
+
+    If *type_filter* is given and it is not ``"season_summary"``, skip all
+    season files.
     """
+    if type_filter is not None and type_filter.lower() != "season_summary":
+        return []
+
+    hermit_lower = hermit_filter.lower() if hermit_filter else None
+
     results = []
     for path in sorted(SEASONS_DIR.glob("season-*.md")):
         try:
@@ -256,6 +313,11 @@ def search_season_files(
             continue
 
         body = _strip_frontmatter(content)
+
+        # Hermit filter: check the body text (Members section mentions the hermit)
+        if hermit_lower is not None and hermit_lower not in body.lower():
+            continue
+
         theme = fm.get("theme", "")
         title = f"Season {season_num}" + (f" — {theme}" if theme else "")
         sc = score_result(tokens, title, body)
@@ -284,6 +346,8 @@ def run_search(
     query: str,
     sources: list[str] | None = None,
     season_filter: int | None = None,
+    hermit_filter: str | None = None,
+    type_filter: str | None = None,
     limit: int = 20,
 ) -> list[dict]:
     """
@@ -291,6 +355,12 @@ def run_search(
 
     Returns a list of result dicts sorted by score (highest first),
     capped at *limit* entries.
+
+    Optional filters (all combinable):
+    - *season_filter*  restrict to a specific season number
+    - *hermit_filter*  restrict to results involving a named hermit
+    - *type_filter*    restrict to a specific result type
+                       (e.g. "build", "collab", "lore", "profile", "season_summary")
     """
     if sources is None:
         sources = list(ALL_SOURCES)
@@ -302,11 +372,17 @@ def run_search(
     all_results: list[dict] = []
 
     if "events" in sources:
-        all_results.extend(search_events(tokens, season_filter))
+        all_results.extend(search_events(
+            tokens, season_filter, hermit_filter, type_filter
+        ))
     if "hermits" in sources:
-        all_results.extend(search_hermit_profiles(tokens, season_filter))
+        all_results.extend(search_hermit_profiles(
+            tokens, season_filter, hermit_filter, type_filter
+        ))
     if "seasons" in sources:
-        all_results.extend(search_season_files(tokens, season_filter))
+        all_results.extend(search_season_files(
+            tokens, season_filter, hermit_filter, type_filter
+        ))
 
     # Sort: score desc, then season asc (None seasons last), then id
     def sort_key(r: dict) -> tuple:
@@ -417,6 +493,25 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Restrict search to a specific season number (1–11).",
     )
     parser.add_argument(
+        "--hermit",
+        metavar="NAME",
+        default=None,
+        help=(
+            "Restrict search to results involving a specific hermit "
+            "(case-insensitive substring match, e.g. --hermit Grian)."
+        ),
+    )
+    parser.add_argument(
+        "--type",
+        metavar="TYPE",
+        default=None,
+        dest="result_type",
+        help=(
+            "Restrict search to a specific result type "
+            "(e.g. build, collab, lore, game, milestone, profile, season_summary)."
+        ),
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=20,
@@ -444,6 +539,8 @@ def main(argv: list[str] | None = None) -> int:
         query=args.query,
         sources=args.sources,
         season_filter=args.season,
+        hermit_filter=args.hermit,
+        type_filter=args.result_type,
         limit=args.limit,
     )
 
@@ -452,6 +549,8 @@ def main(argv: list[str] | None = None) -> int:
             "query": args.query,
             "sources": args.sources,
             "season_filter": args.season,
+            "hermit_filter": args.hermit,
+            "type_filter": args.result_type,
             "result_count": len(results),
             "results": results,
         }
