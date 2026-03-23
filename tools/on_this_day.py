@@ -11,6 +11,7 @@ Usage
   python3 tools/on_this_day.py --month 4 --day 13       # April 13 (server founding!)
   python3 tools/on_this_day.py --month 6 --day 17       # June 17 (Season 7 launch)
   python3 tools/on_this_day.py --window 3               # ±3 day window (default 7)
+  python3 tools/on_this_day.py --all-events                       # enable all event sources (recommended)
   python3 tools/on_this_day.py --no-approximate              # exclude approximate-precision events
   python3 tools/on_this_day.py --include-year                # include year-only events
   python3 tools/on_this_day.py --include-hermit-anniversaries  # add hermit join/YT anniversaries
@@ -324,11 +325,23 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--all-events", action="store_true", default=False,
+        help=(
+            "Enable all event sources (recommended for first use). "
+            "Sets --include-year and --include-hermit-anniversaries to True."
+        ),
+    )
+    parser.add_argument(
         "--pretty", action="store_true",
         help="Output a pretty-printed JSON array instead of NDJSON.",
     )
 
     args = parser.parse_args(argv)
+
+    # --all-events overrides individual include flags
+    if args.all_events:
+        args.include_year = True
+        args.include_hermit_anniversaries = True
 
     today = date.today()
     target_month = args.month if args.month is not None else today.month

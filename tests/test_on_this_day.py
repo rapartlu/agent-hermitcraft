@@ -406,6 +406,38 @@ class TestCLI(unittest.TestCase):
         ids = [e["id"] for e in events]
         self.assertFalse(any(i.startswith("hermit-") for i in ids))
 
+    def test_all_events_flag_no_crash(self):
+        """--all-events should run without error."""
+        r = self._run(["--month", "4", "--day", "13", "--all-events"])
+        self.assertIn(r.returncode, (0, 1))
+
+    def test_all_events_enables_hermit_anniversaries(self):
+        """--all-events should include hermit join events."""
+        r = self._run(["--month", "4", "--day", "13", "--window", "0", "--all-events"])
+        self.assertEqual(r.returncode, 0)
+        events = [json.loads(line) for line in r.stdout.strip().splitlines()]
+        ids = [e["id"] for e in events]
+        hermit_join_ids = [i for i in ids if i.startswith("hermit-") and i.endswith("-join")]
+        self.assertGreater(len(hermit_join_ids), 0, "Expected hermit join events with --all-events")
+
+    def test_all_events_enables_year_precision(self):
+        """--all-events should include year-precision events."""
+        r = self._run(["--month", "6", "--day", "1", "--all-events"])
+        self.assertEqual(r.returncode, 0)
+        events = [json.loads(line) for line in r.stdout.strip().splitlines()]
+        precisions = {e.get("date_precision") for e in events}
+        self.assertIn("year", precisions, "Expected year-precision events with --all-events")
+
+    def test_all_events_is_superset_of_default(self):
+        """--all-events should return at least as many events as the default."""
+        r_default = self._run(["--month", "4", "--day", "13"])
+        r_all = self._run(["--month", "4", "--day", "13", "--all-events"])
+        self.assertEqual(r_default.returncode, 0)
+        self.assertEqual(r_all.returncode, 0)
+        default_events = [json.loads(line) for line in r_default.stdout.strip().splitlines()]
+        all_events = [json.loads(line) for line in r_all.stdout.strip().splitlines()]
+        self.assertGreaterEqual(len(all_events), len(default_events))
+
 
 # ---------------------------------------------------------------------------
 # TestParseFrontmatter
