@@ -13,6 +13,8 @@ Usage
   python3 tools/search.py --query "Decked Out" --season 7
   python3 tools/search.py --query "redstone" --sources events hermits
   python3 tools/search.py --query "mycelium" --limit 5
+  python3 tools/search.py --query "mycelium" --sources lore
+  python3 tools/search.py --query "prank" --sources lore --hermit Grian
   python3 tools/search.py --query "base" --hermit Grian
   python3 tools/search.py --query "war" --type collab
   python3 tools/search.py --query "build" --season 9 --hermit TangoTek --type build
@@ -23,6 +25,7 @@ Sources searched (default: all)
               + knowledge/timelines/video_events.json
   hermits   — knowledge/hermits/*.md  (profiles)
   seasons   — knowledge/seasons/*.md  (season summaries)
+  lore      — knowledge/lore/*.md     (lore / storyline files)
 
 Ranking
 -------
@@ -57,8 +60,9 @@ EVENTS_FILE = ROOT / "knowledge" / "timelines" / "events.json"
 VIDEO_EVENTS_FILE = ROOT / "knowledge" / "timelines" / "video_events.json"
 HERMITS_DIR = ROOT / "knowledge" / "hermits"
 SEASONS_DIR = ROOT / "knowledge" / "seasons"
+LORE_DIR = ROOT / "knowledge" / "lore"
 
-ALL_SOURCES = ("events", "hermits", "seasons")
+ALL_SOURCES = ("events", "hermits", "seasons", "lore")
 
 # ---------------------------------------------------------------------------
 # Scoring helpers
@@ -338,6 +342,146 @@ def search_season_files(
     return results
 
 
+def _parse_lore_hermits(fm: dict) -> list[str]:
+    """
+    Extract the hermits list from lore frontmatter.
+
+    Lore files use either:
+      hermits_involved:  (multi-line YAML list  →  stored as raw text by our
+                          lightweight parser which reads only scalar values)
+    or a plain comma-separated ``hermits:`` scalar.
+
+    Because our frontmatter parser only handles scalar values, the
+    ``hermits_involved`` block is not captured.  We therefore parse the raw
+    YAML block ourselves for list entries.
+    """
+    # Try scalar hermits field first (comma-separated or single value)
+    hermits_scalar = fm.get("hermits", "")
+    if hermits_scalar:
+        return [h.strip() for h in hermits_scalar.split(",") if h.strip()]
+    return []
+
+
+def _parse_lore_hermits_from_raw(content: str) -> list[str]:
+    """
+    Parse YAML list items under ``hermits_involved:`` from raw markdown content.
+    Returns a list of hermit name strings.
+    """
+    hermits: list[str] = []
+    in_block = False
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("hermits_involved:"):
+            in_block = True
+            continue
+        if in_block:
+            if stripped.startswith("- "):
+                hermits.append(stripped[2:].strip())
+            elif stripped and not stripped.startswith("#"):
+                # Another YAML key — end of block
+                in_block = False
+    return hermits
+
+
+def search_lore_files(
+    tokens: list[str],
+    season_filter: int | None = None,
+    hermit_filter: str | None = None,
+    type_filter: str | None = None,
+) -> list[dict]:
+    """
+    Search ``knowledge/lore/*.md`` files for *tokens*.
+
+    Each matching lore file becomes one result with:
+    source, score, season, hermits, id, title, snippet, date, type.
+
+    If *season_filter* is given, only include lore files whose ``season``
+    frontmatter field matches (cross-season lore files with a ``seasons``
+    list are always included if the season appears in that list).
+
+    If *hermit_filter* is given, only include lore files that mention that
+    hermit in the ``hermits_involved`` block or the body text.
+
+    If *type_filter* is given, only include lore files whose ``type``
+    frontmatter field matches (case-insensitive).
+    """
+    results = []
+    for path in sorted(LORE_DIR.glob("*.md")):
+        if path.name == "README.md":
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+
+        fm = _parse_frontmatter(content)
+        lore_type = fm.get("type", "lore")
+
+        # type_filter: match against frontmatter type (exact, case-insensitive)
+        if type_filter is not None and lore_type.lower() != type_filter.lower():
+            continue
+
+        # season_filter: check scalar "season" or list "seasons"
+        if season_filter is not None:
+            scalar_season = fm.get("season", "")
+            try:
+                if int(scalar_season) == season_filter:
+                    pass  # match — proceed
+                else:
+                    # Try "seasons" list field
+                    raw_seasons = fm.get("seasons", "")
+                    season_nums = [int(s) for s in re.findall(r"\d+", raw_seasons)]
+                    if season_filter not in season_nums:
+                        continue
+            except (ValueError, TypeError):
+                raw_seasons = fm.get("seasons", "")
+                season_nums = [int(s) for s in re.findall(r"\d+", raw_seasons)]
+                if season_filter not in season_nums:
+                    continue
+
+        # Hermit list (from YAML block parser)
+        hermits = _parse_lore_hermits_from_raw(content)
+        if not hermits:
+            hermits = _parse_lore_hermits(fm)
+
+        body = _strip_frontmatter(content)
+
+        # hermit_filter: check hermits list + body text
+        if hermit_filter is not None:
+            hermit_lower = hermit_filter.lower()
+            in_hermits = any(hermit_lower in h.lower() for h in hermits)
+            in_body = hermit_lower in body.lower()
+            if not in_hermits and not in_body:
+                continue
+
+        title = fm.get("title", path.stem.replace("-", " ").title())
+        sc = score_result(tokens, title, body)
+        if sc <= 0:
+            continue
+
+        # Season: prefer scalar "season"; fall back to first entry of "seasons"
+        season_val: int | None = None
+        try:
+            season_val = int(fm.get("season", ""))
+        except (ValueError, TypeError):
+            raw_seasons = fm.get("seasons", "")
+            nums = [int(s) for s in re.findall(r"\d+", raw_seasons)]
+            season_val = nums[0] if nums else None
+
+        results.append({
+            "source": "lore_file",
+            "score": sc,
+            "season": season_val,
+            "hermits": hermits,
+            "id": f"lore-{path.stem}",
+            "title": title,
+            "snippet": make_snippet(body, tokens),
+            "date": "",
+            "type": lore_type,
+        })
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Top-level search
 # ---------------------------------------------------------------------------
@@ -381,6 +525,10 @@ def run_search(
         ))
     if "seasons" in sources:
         all_results.extend(search_season_files(
+            tokens, season_filter, hermit_filter, type_filter
+        ))
+    if "lore" in sources:
+        all_results.extend(search_lore_files(
             tokens, season_filter, hermit_filter, type_filter
         ))
 
