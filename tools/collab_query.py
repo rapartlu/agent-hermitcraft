@@ -5,11 +5,20 @@ Finds shared events between two named Hermits across all seasons, answering
 questions like "when did Grian and Mumbo interact?" or "what did TangoTek and
 Iskall build together in Season 7?".
 
+Also supports a leaderboard mode that ranks all hermits by shared-event count
+with a single target hermit.
+
 Usage:
     python -m tools.collab_query --hermit-a Grian --hermit-b Mumbo
     python -m tools.collab_query --hermit-a TangoTek --hermit-b Iskall85 --season 7
     python -m tools.collab_query --hermit-a EthosLab --hermit-b BdoubleO100 --json
     python -m tools.collab_query --hermit-a Grian --hermit-b Scar --types lore build
+
+    # Top-collaborators leaderboard mode:
+    python -m tools.collab_query --hermit-a Grian --top-collabs
+    python -m tools.collab_query --hermit-a TangoTek --top-collabs --top 5
+    python -m tools.collab_query --hermit-a Iskall85 --top-collabs --season 8
+    python -m tools.collab_query --hermit-a Grian --top-collabs --json
 """
 
 from __future__ import annotations
@@ -152,6 +161,70 @@ def find_shared_events(
 # Output helpers
 # ---------------------------------------------------------------------------
 
+def _all_hermit_names() -> list[str]:
+    """Return canonical display names for all hermit profiles."""
+    names: list[str] = []
+    for path in sorted(HERMITS_DIR.glob("*.md")):
+        if path.name == "README.md":
+            continue
+        content = path.read_text(encoding="utf-8")
+        fm_name = ""
+        if content.startswith("---"):
+            end = content.find("\n---", 3)
+            if end != -1:
+                for line in content[3:end].splitlines():
+                    if line.startswith("name:"):
+                        fm_name = line.split(":", 1)[1].strip().strip('"').strip("'")
+                        break
+        names.append(fm_name or path.stem)
+    return names
+
+
+def find_top_collaborators(
+    name_a: str,
+    season_filter: int | None = None,
+    top_n: int = 10,
+) -> list[dict]:
+    """
+    Return a ranked list of hermits by shared-event count with *name_a*.
+
+    Each entry is a dict with keys:
+        rank, hermit, event_count, seasons
+
+    Args:
+        name_a: Canonical display name of the target hermit.
+        season_filter: If given, restrict to this season number.
+        top_n: Maximum number of results to return.
+
+    Returns:
+        List of dicts sorted descending by event_count, ties broken by name.
+    """
+    all_names = _all_hermit_names()
+    norm_a = _normalise(name_a)
+
+    results: list[dict] = []
+    for name_b in all_names:
+        if _normalise(name_b) == norm_a:
+            continue
+        events = find_shared_events(name_a, name_b, season_filter=season_filter)
+        if not events:
+            continue
+        seasons = _seasons_covered(events)
+        results.append(
+            {
+                "hermit": name_b,
+                "event_count": len(events),
+                "seasons": seasons,
+            }
+        )
+
+    results.sort(key=lambda x: (-x["event_count"], x["hermit"].lower()))
+    ranked: list[dict] = []
+    for i, entry in enumerate(results[:top_n], start=1):
+        ranked.append({"rank": i, **entry})
+    return ranked
+
+
 def _seasons_covered(events: list[dict]) -> list[int]:
     seen: set[int] = set()
     for ev in events:
@@ -249,6 +322,40 @@ def format_text(output: dict) -> str:
     return "\n".join(lines)
 
 
+def format_top_collabs(
+    name_a: str,
+    ranked: list[dict],
+    season_filter: int | None = None,
+) -> str:
+    """Format top-collaborators leaderboard as a human-readable table."""
+    season_label = f"Season {season_filter}" if season_filter else "all seasons"
+    lines: list[str] = []
+    lines.append(f"Top collaborators for {name_a} ({season_label}):")
+
+    if not ranked:
+        lines.append("  (no shared events found)")
+        return "\n".join(lines)
+
+    # Column widths
+    max_name = max(len(e["hermit"]) for e in ranked)
+    col_w = max(max_name, 6)
+
+    for entry in ranked:
+        rank = entry["rank"]
+        hermit = entry["hermit"]
+        count = entry["event_count"]
+        seasons = entry.get("seasons", [])
+        s_str = ", ".join(f"S{s}" for s in seasons) if seasons else ""
+        s_part = f"  ({s_str})" if s_str else ""
+        plural = "s" if count != 1 else " "
+        lines.append(
+            f"  {rank:2d}. {hermit:<{col_w}}  "
+            f"{count} shared event{plural}{s_part}"
+        )
+
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -258,20 +365,32 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="python -m tools.collab_query",
         description=(
             "Find shared Hermitcraft events between two Hermits. "
-            "Answers 'when did A and B collaborate?'"
+            "Answers 'when did A and B collaborate?' or "
+            "'who does A collaborate with most?' (--top-collabs)."
         ),
     )
     p.add_argument(
         "--hermit-a",
         required=True,
         metavar="NAME",
-        help="First Hermit (case-insensitive, partial match ok)",
+        help="Target Hermit (case-insensitive, partial match ok)",
     )
     p.add_argument(
         "--hermit-b",
-        required=True,
         metavar="NAME",
-        help="Second Hermit (case-insensitive, partial match ok)",
+        help="Second Hermit for pairwise query (required unless --top-collabs)",
+    )
+    p.add_argument(
+        "--top-collabs",
+        action="store_true",
+        help="Leaderboard mode: rank all Hermits by shared-event count with --hermit-a",
+    )
+    p.add_argument(
+        "--top",
+        type=int,
+        default=10,
+        metavar="N",
+        help="Max results in --top-collabs mode (default: 10)",
     )
     p.add_argument(
         "--season",
@@ -283,7 +402,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--types",
         nargs="+",
         metavar="TYPE",
-        help="Restrict to event types, e.g. --types lore build collab",
+        help="Restrict to event types (pairwise mode only), e.g. --types lore build",
     )
     p.add_argument(
         "--json",
@@ -297,6 +416,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    # Validate mode
+    if not args.top_collabs and args.hermit_b is None:
+        parser.error("--hermit-b is required unless --top-collabs is specified")
+
     name_a = _resolve_hermit_name(args.hermit_a)
     if name_a is None:
         print(
@@ -306,6 +429,26 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    # ── Top-collabs leaderboard mode ──────────────────────────────────────
+    if args.top_collabs:
+        ranked = find_top_collaborators(
+            name_a,
+            season_filter=args.season,
+            top_n=args.top,
+        )
+        if args.json:
+            out: dict = {
+                "hermit": name_a,
+                "season_filter": args.season,
+                "top_n": args.top,
+                "leaderboard": ranked,
+            }
+            print(json.dumps(out, indent=2))
+        else:
+            print(format_top_collabs(name_a, ranked, season_filter=args.season))
+        return 0
+
+    # ── Pairwise mode ─────────────────────────────────────────────────────
     name_b = _resolve_hermit_name(args.hermit_b)
     if name_b is None:
         print(
