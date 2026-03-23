@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 
 from tools.on_this_day import (
     DEFAULT_WINDOW,
+    VIDEO_EVENTS_FILE,
     _infer_precision,
     _parse_frontmatter,
     find_on_this_day,
@@ -763,6 +764,144 @@ class TestHermitProfilesRealData(unittest.TestCase):
             self.assertIn("Reaches", e["title"])
             self.assertIn("Subscribers", e["title"])
             self.assertEqual(e["season"], 0)
+
+
+class TestVideoEventsFile(unittest.TestCase):
+    """Integration tests against the real video_events.json data file."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.events = load_events(VIDEO_EVENTS_FILE)
+
+    def test_file_exists(self):
+        self.assertTrue(VIDEO_EVENTS_FILE.exists(), "video_events.json should exist")
+
+    def test_valid_json_array(self):
+        self.assertIsInstance(self.events, list)
+        self.assertGreater(len(self.events), 0)
+
+    def test_has_at_least_50_events(self):
+        self.assertGreaterEqual(
+            len(self.events), 50,
+            f"Expected ≥50 video events, found {len(self.events)}",
+        )
+
+    def test_all_events_have_video_type(self):
+        non_video = [e for e in self.events if e.get("type") != "video"]
+        self.assertEqual(
+            non_video, [],
+            f"All video_events.json entries must have type='video'; "
+            f"offenders: {[e.get('id') for e in non_video]}",
+        )
+
+    def test_all_events_have_required_fields(self):
+        required = {"id", "date", "date_precision", "season", "hermits",
+                    "type", "title", "description"}
+        for event in self.events:
+            missing = required - set(event.keys())
+            self.assertEqual(
+                missing, set(),
+                f"Event {event.get('id')} is missing fields: {missing}",
+            )
+
+    def test_all_ids_unique(self):
+        ids = [e["id"] for e in self.events]
+        self.assertEqual(len(ids), len(set(ids)), "All video event IDs must be unique")
+
+    def test_dates_have_valid_format(self):
+        pattern = re.compile(r"^\d{4}(-\d{2}(-\d{2})?)?$")
+        for event in self.events:
+            self.assertRegex(
+                event["date"], pattern,
+                f"Event {event['id']} has invalid date format: {event['date']}",
+            )
+
+    def test_hermits_field_is_list(self):
+        for event in self.events:
+            self.assertIsInstance(
+                event["hermits"], list,
+                f"Event {event['id']} hermits should be a list",
+            )
+
+    def test_events_span_multiple_seasons(self):
+        seasons = {e["season"] for e in self.events}
+        self.assertGreaterEqual(
+            len(seasons), 5,
+            f"Video events should span ≥5 seasons, found: {sorted(seasons)}",
+        )
+
+    def test_events_span_multiple_hermits(self):
+        all_hermits = {h for e in self.events for h in e.get("hermits", [])}
+        self.assertGreaterEqual(
+            len(all_hermits), 5,
+            "Video events should mention ≥5 distinct hermits",
+        )
+
+
+class TestVideoEventsCLI(unittest.TestCase):
+    """CLI integration tests for --include-video-events and --all-events."""
+
+    TOOL = [sys.executable, str(ROOT / "tools" / "on_this_day.py")]
+
+    def _run(self, *args):
+        return subprocess.run(
+            self.TOOL + list(args),
+            capture_output=True, text=True,
+        )
+
+    def test_include_video_events_flag_no_crash(self):
+        result = self._run("--month", "7", "--day", "19", "--include-video-events")
+        self.assertIn(result.returncode, (0, 1))
+
+    def test_video_events_absent_without_flag(self):
+        """Without --include-video-events, no type=video events should appear."""
+        result = self._run("--month", "7", "--day", "19")
+        if result.returncode == 0:
+            events = [json.loads(line) for line in result.stdout.strip().splitlines()]
+            video_events = [e for e in events if e.get("type") == "video"]
+            self.assertEqual(video_events, [], "No video events expected without flag")
+
+    def test_video_events_present_with_flag(self):
+        """--include-video-events on July 19 (Grian S6 launch) returns ≥1 video event."""
+        result = self._run("--month", "7", "--day", "19", "--include-video-events")
+        self.assertEqual(result.returncode, 0)
+        events = [json.loads(line) for line in result.stdout.strip().splitlines()]
+        video_events = [e for e in events if e.get("type") == "video"]
+        self.assertGreater(len(video_events), 0, "Expected ≥1 video event on July 19")
+
+    def test_all_events_includes_video_events(self):
+        """--all-events on July 19 includes both milestone and video events."""
+        result = self._run("--month", "7", "--day", "19", "--all-events")
+        self.assertEqual(result.returncode, 0)
+        events = [json.loads(line) for line in result.stdout.strip().splitlines()]
+        types = {e.get("type") for e in events}
+        self.assertIn("video", types, "--all-events should include video events")
+        self.assertIn("milestone", types, "--all-events should still include milestone events")
+
+    def test_video_events_default_ndjson_format(self):
+        """--include-video-events default output is valid NDJSON."""
+        result = self._run("--month", "7", "--day", "19", "--include-video-events")
+        self.assertEqual(result.returncode, 0)
+        for line in result.stdout.strip().splitlines():
+            obj = json.loads(line)
+            self.assertIn("type", obj)
+
+    def test_video_events_pretty_format(self):
+        """--include-video-events --pretty outputs a JSON array."""
+        result = self._run("--month", "7", "--day", "19",
+                           "--include-video-events", "--pretty")
+        self.assertEqual(result.returncode, 0)
+        parsed = json.loads(result.stdout)
+        self.assertIsInstance(parsed, list)
+
+    def test_all_events_is_superset_of_video_events_alone(self):
+        """--all-events result count >= --include-video-events result count on same date."""
+        all_result = self._run("--month", "7", "--day", "19", "--all-events")
+        vid_result = self._run("--month", "7", "--day", "19", "--include-video-events")
+        if all_result.returncode == 0 and vid_result.returncode == 0:
+            all_count = len(all_result.stdout.strip().splitlines())
+            vid_count = len(vid_result.stdout.strip().splitlines())
+            self.assertGreaterEqual(all_count, vid_count)
 
 
 if __name__ == "__main__":

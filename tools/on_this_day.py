@@ -11,11 +11,12 @@ Usage
   python3 tools/on_this_day.py --month 4 --day 13       # April 13 (server founding!)
   python3 tools/on_this_day.py --month 6 --day 17       # June 17 (Season 7 launch)
   python3 tools/on_this_day.py --window 3               # ±3 day window (default 7)
-  python3 tools/on_this_day.py --all-events                       # enable all event sources (recommended)
-  python3 tools/on_this_day.py --no-approximate              # exclude approximate-precision events
-  python3 tools/on_this_day.py --include-year                # include year-only events
+  python3 tools/on_this_day.py --all-events                         # enable all event sources (recommended)
+  python3 tools/on_this_day.py --no-approximate                # exclude approximate-precision events
+  python3 tools/on_this_day.py --include-year                  # include year-only events
   python3 tools/on_this_day.py --include-hermit-anniversaries  # add hermit join/YT/subscriber anniversaries
-  python3 tools/on_this_day.py --pretty                      # indented JSON array output
+  python3 tools/on_this_day.py --include-video-events          # add notable video/stream milestone events
+  python3 tools/on_this_day.py --pretty                        # indented JSON array output
 
 Date precision handling
 -----------------------
@@ -45,6 +46,7 @@ from datetime import date
 from pathlib import Path
 
 EVENTS_FILE = Path(__file__).parent.parent / "knowledge" / "timelines" / "events.json"
+VIDEO_EVENTS_FILE = Path(__file__).parent.parent / "knowledge" / "timelines" / "video_events.json"
 HERMITS_DIR = Path(__file__).parent.parent / "knowledge" / "hermits"
 
 # Day-of-year matching window in days (default)
@@ -386,10 +388,19 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--include-video-events", action="store_true", default=False,
+        help=(
+            "Include notable per-hermit video and stream milestone events "
+            "(e.g. first season episodes, iconic builds, major server events). "
+            "Loaded from knowledge/timelines/video_events.json."
+        ),
+    )
+    parser.add_argument(
         "--all-events", action="store_true", default=False,
         help=(
             "Enable all event sources (recommended for first use). "
-            "Sets --include-year and --include-hermit-anniversaries to True."
+            "Sets --include-year, --include-hermit-anniversaries, and "
+            "--include-video-events to True."
         ),
     )
     parser.add_argument(
@@ -403,6 +414,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.all_events:
         args.include_year = True
         args.include_hermit_anniversaries = True
+        args.include_video_events = True
 
     today = date.today()
     target_month = args.month if args.month is not None else today.month
@@ -423,6 +435,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.include_hermit_anniversaries:
         profiles = load_hermit_profiles()
         events = events + synthesise_hermit_events(profiles)
+
+    if args.include_video_events:
+        events = events + load_events(VIDEO_EVENTS_FILE)
 
     results = find_on_this_day(
         events,
