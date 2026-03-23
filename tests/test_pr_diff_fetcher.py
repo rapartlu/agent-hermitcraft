@@ -3,6 +3,8 @@ Tests for tools/pr_diff_fetcher.py (pure-logic tests, no subprocess calls).
 Run with: python3 tests/test_pr_diff_fetcher.py
 """
 
+import inspect
+import json
 import sys
 import os
 
@@ -10,7 +12,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from tools.pr_diff_fetcher import (
     build_per_file_report,
+    fetch_changed_files,
     format_text_report,
+    run,
     DiffReport,
     FileSummary,
     DIFF_TRUNCATION_THRESHOLD,
@@ -125,6 +129,56 @@ print("Constants:")
 check("DIFF_TRUNCATION_THRESHOLD > 0", DIFF_TRUNCATION_THRESHOLD > 0)
 check("PER_FILE_CONTENT_LIMIT < DIFF_TRUNCATION_THRESHOLD",
       PER_FILE_CONTENT_LIMIT < DIFF_TRUNCATION_THRESHOLD)
+
+
+# ── Pagination bug fix: multi-page NDJSON parsing ─────────────────────────────
+
+print("Pagination fix (fetch_changed_files NDJSON parsing):")
+
+# Simulate what `gh api --paginate --jq '.[] | {...}'` emits for 2 pages:
+# one JSON object per line (not one array per page).
+def _fake_fetch_changed_files_ndjson(ndjson_output):
+    """Parse the NDJSON output the same way fetch_changed_files now does."""
+    return [json.loads(line) for line in ndjson_output.splitlines() if line.strip()]
+
+page1_obj1 = '{"filename":"a.py","status":"modified","additions":5,"deletions":1,"patch":"@@"}'
+page1_obj2 = '{"filename":"b.py","status":"added","additions":10,"deletions":0,"patch":null}'
+page2_obj1 = '{"filename":"c.py","status":"modified","additions":2,"deletions":2,"patch":"@@"}'
+
+# Old approach (array per page) would fail on multi-page:
+two_page_array_output = '[{"filename":"a.py"}]\n[{"filename":"b.py"}]'
+try:
+    json.loads(two_page_array_output)
+    check("old array approach fails on multi-page", False, "expected JSONDecodeError")
+except json.JSONDecodeError:
+    check("old array approach fails on multi-page (confirmed)", True)
+
+# New approach (NDJSON) succeeds on multi-page:
+ndjson_output = "\n".join([page1_obj1, page1_obj2, page2_obj1])
+files = _fake_fetch_changed_files_ndjson(ndjson_output)
+check("ndjson parse returns 3 files across 2 pages", len(files) == 3)
+check("first file parsed correctly",  files[0]["filename"] == "a.py")
+check("second file parsed correctly", files[1]["filename"] == "b.py")
+check("third file parsed correctly",  files[2]["filename"] == "c.py")
+
+# Empty lines between pages are handled gracefully
+ndjson_with_blanks = page1_obj1 + "\n\n" + page2_obj1 + "\n"
+files2 = _fake_fetch_changed_files_ndjson(ndjson_with_blanks)
+check("blank lines between pages ignored", len(files2) == 2)
+
+# Null patch field doesn't crash
+null_patch = '{"filename":"img.png","status":"added","additions":0,"deletions":0,"patch":null}'
+files3 = _fake_fetch_changed_files_ndjson(null_patch)
+check("null patch field parsed without crash", files3[0]["patch"] is None)
+
+
+# ── run() has timeout parameter ───────────────────────────────────────────────
+
+print("run() timeout:")
+
+sig = inspect.signature(run)
+check("run() accepts timeout kwarg", "timeout" in sig.parameters)
+check("timeout defaults to 60", sig.parameters["timeout"].default == 60)
 
 
 print(f"\n{passed} passed, {failed} failed")

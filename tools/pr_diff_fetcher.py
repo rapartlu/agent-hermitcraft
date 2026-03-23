@@ -62,9 +62,9 @@ class DiffReport:
     unified_diff: Optional[str]  # populated in unified mode only
 
 
-def run(cmd: list) -> tuple[int, str, str]:
+def run(cmd: list, timeout: int = 60) -> tuple[int, str, str]:
     """Run a subprocess, return (returncode, stdout, stderr)."""
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     return result.returncode, result.stdout, result.stderr
 
 
@@ -77,17 +77,23 @@ def fetch_unified_diff(repo: str, pr: int) -> tuple[Optional[str], Optional[str]
 
 
 def fetch_changed_files(repo: str, pr: int) -> tuple[Optional[list], Optional[str]]:
-    """Returns (files_list, error_message) using gh api."""
+    """Returns (files_list, error_message) using gh api.
+
+    Uses `.[] | {...}` (stream of objects) rather than `[.[] | {...}]`
+    (array) so that --paginate emits one object per line instead of one
+    array per page.  Parsing multi-page output as a single JSON array
+    raises JSONDecodeError because each page produces a separate array.
+    """
     rc, stdout, stderr = run([
         "gh", "api",
         f"repos/{repo}/pulls/{pr}/files",
         "--paginate",
-        "--jq", "[.[] | {filename, status, additions, deletions, patch}]"
+        "--jq", ".[] | {filename, status, additions, deletions, patch}"
     ])
     if rc != 0:
         return None, stderr.strip() or f"gh api exited {rc}"
     try:
-        files = json.loads(stdout)
+        files = [json.loads(line) for line in stdout.splitlines() if line.strip()]
         return files, None
     except json.JSONDecodeError as e:
         return None, f"JSON parse error: {e}"
