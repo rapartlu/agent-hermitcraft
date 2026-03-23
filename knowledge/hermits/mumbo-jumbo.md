@@ -14,6 +14,11 @@ specialties:
   - automation
   - farms
 seasons: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+subscriber_milestones:
+  - { date: "2018-01", count: "1M" }
+  - { date: "2019-08", count: "3M" }
+  - { date: "2020-10", count: "6M" }
+  - { date: "2021-11", count: "7M" }
 ---
 
 # MumboJumbo

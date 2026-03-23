@@ -15,6 +15,9 @@ specialties:
   - mega-projects
   - business ventures
 seasons: [4, 5, 6, 7, 8, 9, 10, 11]
+subscriber_milestones:
+  - { date: "2019-07", count: "500K" }
+  - { date: "2020-08", count: "1M" }
 ---
 
 # Iskall85

@@ -522,6 +522,130 @@ class TestSynthesiseHermitEvents(unittest.TestCase):
     def test_empty_profiles_returns_empty_list(self):
         self.assertEqual(synthesise_hermit_events([]), [])
 
+    def test_subscriber_milestone_creates_subs_event(self):
+        profiles = [self._profile(subscriber_milestones=[
+            {"date": "2021-08", "count": "10M"},
+        ])]
+        events = synthesise_hermit_events(profiles)
+        subs_events = [e for e in events if "-subs-" in e["id"]]
+        self.assertEqual(len(subs_events), 1)
+        e = subs_events[0]
+        self.assertEqual(e["id"], "hermit-testhermit-subs-10m")
+        self.assertEqual(e["date"], "2021-08")
+        self.assertEqual(e["date_precision"], "month")
+        self.assertEqual(e["type"], "milestone")
+        self.assertEqual(e["source"], "hermit_profile")
+        self.assertIn("TestHermit", e["hermits"])
+        self.assertIn("10M", e["title"])
+        self.assertIn("Reaches", e["title"])
+
+    def test_subscriber_milestone_title_format(self):
+        profiles = [self._profile(subscriber_milestones=[
+            {"date": "2019-03", "count": "5M"},
+        ])]
+        events = synthesise_hermit_events(profiles)
+        subs_event = next(e for e in events if "-subs-" in e["id"])
+        self.assertEqual(subs_event["title"], "TestHermit Reaches 5M Subscribers")
+
+    def test_multiple_subscriber_milestones(self):
+        profiles = [self._profile(subscriber_milestones=[
+            {"date": "2019-03", "count": "1M"},
+            {"date": "2021-08", "count": "5M"},
+            {"date": "2023-01", "count": "10M"},
+        ])]
+        events = synthesise_hermit_events(profiles)
+        subs_events = [e for e in events if "-subs-" in e["id"]]
+        self.assertEqual(len(subs_events), 3)
+
+    def test_subscriber_milestone_missing_date_skipped(self):
+        profiles = [self._profile(subscriber_milestones=[
+            {"count": "5M"},  # no date
+        ])]
+        events = synthesise_hermit_events(profiles)
+        subs_events = [e for e in events if "-subs-" in e["id"]]
+        self.assertEqual(len(subs_events), 0)
+
+    def test_subscriber_milestone_missing_count_skipped(self):
+        profiles = [self._profile(subscriber_milestones=[
+            {"date": "2021-08"},  # no count
+        ])]
+        events = synthesise_hermit_events(profiles)
+        subs_events = [e for e in events if "-subs-" in e["id"]]
+        self.assertEqual(len(subs_events), 0)
+
+    def test_no_subscriber_milestones_no_subs_event(self):
+        profiles = [self._profile(join_date="2020-06-17")]
+        events = synthesise_hermit_events(profiles)
+        self.assertFalse(any("-subs-" in e["id"] for e in events))
+
+    def test_subscriber_milestone_season_is_zero(self):
+        profiles = [self._profile(joined_season="7", subscriber_milestones=[
+            {"date": "2021-08", "count": "10M"},
+        ])]
+        events = synthesise_hermit_events(profiles)
+        subs_event = next(e for e in events if "-subs-" in e["id"])
+        self.assertEqual(subs_event["season"], 0)
+
+    def test_subscriber_milestone_day_precision(self):
+        profiles = [self._profile(subscriber_milestones=[
+            {"date": "2021-08-15", "count": "10M"},
+        ])]
+        events = synthesise_hermit_events(profiles)
+        subs_event = next(e for e in events if "-subs-" in e["id"])
+        self.assertEqual(subs_event["date_precision"], "day")
+
+
+# ---------------------------------------------------------------------------
+# TestParseFrontmatterSubscriberMilestones
+# ---------------------------------------------------------------------------
+
+class TestParseFrontmatterSubscriberMilestones(unittest.TestCase):
+
+    def test_parses_subscriber_milestones_list(self):
+        content = (
+            "---\n"
+            "name: Grian\n"
+            "subscriber_milestones:\n"
+            '  - { date: "2019-03", count: "1M" }\n'
+            '  - { date: "2021-08", count: "5M" }\n'
+            "---\n"
+        )
+        fm = _parse_frontmatter(content)
+        self.assertIn("subscriber_milestones", fm)
+        milestones = fm["subscriber_milestones"]
+        self.assertIsInstance(milestones, list)
+        self.assertEqual(len(milestones), 2)
+        self.assertEqual(milestones[0]["date"], "2019-03")
+        self.assertEqual(milestones[0]["count"], "1M")
+        self.assertEqual(milestones[1]["date"], "2021-08")
+        self.assertEqual(milestones[1]["count"], "5M")
+
+    def test_scalar_fields_still_parsed_alongside_milestones(self):
+        content = (
+            "---\n"
+            "name: Grian\n"
+            "joined_season: 6\n"
+            "subscriber_milestones:\n"
+            '  - { date: "2020-04", count: "5M" }\n'
+            "---\n"
+        )
+        fm = _parse_frontmatter(content)
+        self.assertEqual(fm["name"], "Grian")
+        self.assertEqual(fm["joined_season"], "6")
+        self.assertIn("subscriber_milestones", fm)
+
+    def test_empty_subscriber_milestones_list(self):
+        content = (
+            "---\n"
+            "name: Grian\n"
+            "subscriber_milestones:\n"
+            "---\n"
+        )
+        fm = _parse_frontmatter(content)
+        # No milestone items parsed — key may be absent or empty list
+        milestones = fm.get("subscriber_milestones", [])
+        self.assertEqual(milestones, [])
+
 
 # ---------------------------------------------------------------------------
 # TestHermitProfilesRealData
@@ -572,6 +696,41 @@ class TestHermitProfilesRealData(unittest.TestCase):
         grian_join = next((e for e in events if e["id"] == "hermit-grian-join"), None)
         self.assertIsNotNone(grian_join)
         self.assertEqual(grian_join["date"], "2018-07-19")
+
+    def test_at_least_5_profiles_have_subscriber_milestones(self):
+        with_milestones = [
+            p for p in self.profiles
+            if isinstance(p.get("subscriber_milestones"), list)
+            and len(p["subscriber_milestones"]) > 0
+        ]
+        self.assertGreaterEqual(
+            len(with_milestones), 5,
+            f"Expected ≥5 profiles with subscriber_milestones, found {len(with_milestones)}",
+        )
+
+    def test_grian_has_subscriber_milestones(self):
+        grian = next((p for p in self.profiles if p.get("name") == "Grian"), None)
+        self.assertIsNotNone(grian)
+        self.assertIsInstance(grian.get("subscriber_milestones"), list)
+        self.assertGreater(len(grian["subscriber_milestones"]), 0)
+
+    def test_subscriber_milestone_events_synthesised(self):
+        events = synthesise_hermit_events(self.profiles)
+        subs_events = [e for e in events if "-subs-" in e["id"]]
+        self.assertGreater(
+            len(subs_events), 0,
+            "Expected at least one subscriber milestone event from real profiles",
+        )
+
+    def test_subscriber_milestone_events_have_correct_fields(self):
+        events = synthesise_hermit_events(self.profiles)
+        subs_events = [e for e in events if "-subs-" in e["id"]]
+        for e in subs_events:
+            self.assertEqual(e["source"], "hermit_profile")
+            self.assertEqual(e["type"], "milestone")
+            self.assertIn("Reaches", e["title"])
+            self.assertIn("Subscribers", e["title"])
+            self.assertEqual(e["season"], 0)
 
 
 if __name__ == "__main__":

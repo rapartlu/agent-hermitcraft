@@ -14,6 +14,11 @@ specialties:
   - pranks
   - storytelling
 seasons: [6, 7, 8, 9, 10, 11]
+subscriber_milestones:
+  - { date: "2019-03", count: "1M" }
+  - { date: "2020-04", count: "5M" }
+  - { date: "2022-06", count: "7M" }
+  - { date: "2024-01", count: "8M" }
 ---
 
 # Grian
