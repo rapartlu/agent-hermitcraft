@@ -20,6 +20,7 @@ from tools.on_this_day import (
     _parse_frontmatter,
     filter_by_hermit,
     find_on_this_day,
+    format_digest,
     load_events,
     load_hermit_profiles,
     matches_on_this_day,
@@ -1044,6 +1045,188 @@ class TestFilterByHermitCLI(unittest.TestCase):
             for line in result.stdout.strip().splitlines():
                 obj = json.loads(line)
                 self.assertIn("id", obj)
+
+
+# ---------------------------------------------------------------------------
+# TestFormatDigest — unit tests for format_digest()
+# ---------------------------------------------------------------------------
+
+class TestFormatDigest(unittest.TestCase):
+    """Tests for the format_digest() human-readable output function."""
+
+    SAMPLE_EVENTS = [
+        _make_event(
+            id="s1-001", date="2012-04-13", date_precision="day",
+            season=1, hermits=["Generikb", "Xisumavoid"],
+            event_type="milestone", title="Hermitcraft Server Founded",
+            description="Generikb launches Hermitcraft with ten founding members.",
+        ),
+        _make_event(
+            id="s7-001", date="2020-02-28", date_precision="day",
+            season=7, hermits=["All"],
+            event_type="milestone", title="Season 7 Launch",
+            description="Season 7 launches during COVID-19 lockdowns.",
+        ),
+    ]
+
+    def test_returns_string(self):
+        out = format_digest(self.SAMPLE_EVENTS, 4, 13)
+        self.assertIsInstance(out, str)
+
+    def test_header_contains_date(self):
+        out = format_digest(self.SAMPLE_EVENTS, 4, 13)
+        self.assertIn("April 13", out)
+
+    def test_header_contains_on_this_day(self):
+        out = format_digest(self.SAMPLE_EVENTS, 4, 13)
+        self.assertIn("ON THIS DAY IN HERMITCRAFT", out)
+
+    def test_event_title_present(self):
+        out = format_digest(self.SAMPLE_EVENTS, 4, 13)
+        self.assertIn("Hermitcraft Server Founded", out)
+        self.assertIn("Season 7 Launch", out)
+
+    def test_year_label_present(self):
+        out = format_digest(self.SAMPLE_EVENTS, 4, 13)
+        self.assertIn("[2012]", out)
+        self.assertIn("[2020]", out)
+
+    def test_season_label_present(self):
+        out = format_digest(self.SAMPLE_EVENTS, 4, 13)
+        self.assertIn("Season 1", out)
+        self.assertIn("Season 7", out)
+
+    def test_hermit_names_present(self):
+        out = format_digest(self.SAMPLE_EVENTS, 4, 13)
+        self.assertIn("Generikb", out)
+        self.assertIn("All", out)
+
+    def test_description_present(self):
+        out = format_digest(self.SAMPLE_EVENTS, 4, 13)
+        self.assertIn("ten founding members", out)
+
+    def test_event_count_in_footer(self):
+        out = format_digest(self.SAMPLE_EVENTS, 4, 13)
+        self.assertIn("2 events found", out)
+
+    def test_single_event_singular_label(self):
+        out = format_digest(self.SAMPLE_EVENTS[:1], 4, 13)
+        self.assertIn("1 event found", out)
+        self.assertNotIn("1 events found", out)
+
+    def test_empty_events_shows_nothing_recorded(self):
+        out = format_digest([], 4, 13)
+        self.assertIn("Nothing recorded", out)
+
+    def test_empty_events_contains_hint(self):
+        out = format_digest([], 4, 13)
+        self.assertIn("--all-events", out)
+
+    def test_different_month_days(self):
+        out2 = format_digest([], 6, 19)
+        self.assertIn("June 19", out2)
+        out3 = format_digest([], 12, 22)
+        self.assertIn("December 22", out3)
+
+    def test_pre_hermitcraft_season_label(self):
+        pre_event = _make_event(
+            id="pre-1", date="2010-01-01", season=0,
+            hermits=["EthosLab"], event_type="milestone",
+            title="EthosLab Starts YouTube",
+        )
+        out = format_digest([pre_event], 1, 1)
+        self.assertIn("pre-Hermitcraft", out)
+
+
+# ---------------------------------------------------------------------------
+# TestDigestCLI — CLI tests for --digest flag
+# ---------------------------------------------------------------------------
+
+class TestDigestCLI(unittest.TestCase):
+    """End-to-end tests for the --digest CLI flag."""
+
+    SCRIPT = str(ROOT / "tools" / "on_this_day.py")
+
+    def _run(self, *args: str):
+        return subprocess.run(
+            [sys.executable, self.SCRIPT, *args],
+            capture_output=True, text=True,
+        )
+
+    def test_digest_exits_0_on_known_premiere_date(self):
+        # Feb 28 = Season 7 launch; Season 4 launch — known premiere date
+        result = self._run("--month", "2", "--day", "28", "--digest")
+        self.assertEqual(result.returncode, 0)
+
+    def test_digest_exits_0_on_server_founding_date(self):
+        result = self._run("--month", "4", "--day", "13", "--digest")
+        self.assertEqual(result.returncode, 0)
+
+    def test_digest_output_contains_on_this_day_header(self):
+        result = self._run("--month", "4", "--day", "13", "--digest")
+        self.assertIn("ON THIS DAY IN HERMITCRAFT", result.stdout)
+
+    def test_digest_output_contains_date(self):
+        result = self._run("--month", "4", "--day", "13", "--digest")
+        self.assertIn("April 13", result.stdout)
+
+    def test_digest_output_contains_event_count(self):
+        result = self._run("--month", "4", "--day", "13", "--digest")
+        self.assertIn("event", result.stdout)
+
+    def test_digest_sparse_date_exits_1(self):
+        # Very narrow window on a date with no known events
+        result = self._run("--month", "1", "--day", "15", "--window", "0", "--digest")
+        self.assertEqual(result.returncode, 1)
+
+    def test_digest_sparse_date_prints_nothing_recorded(self):
+        result = self._run("--month", "1", "--day", "15", "--window", "0", "--digest")
+        self.assertIn("Nothing recorded", result.stdout)
+
+    def test_digest_sparse_date_no_stderr(self):
+        # With --digest, "nothing found" goes to stdout, not stderr
+        result = self._run("--month", "1", "--day", "15", "--window", "0", "--digest")
+        self.assertEqual(result.stderr, "")
+
+    def test_digest_all_events_returns_more_than_default(self):
+        default = self._run("--month", "4", "--day", "13", "--digest")
+        all_ev = self._run("--month", "4", "--day", "13", "--all-events", "--digest")
+        if default.returncode == 0 and all_ev.returncode == 0:
+            # Count lines as proxy for event count
+            self.assertGreaterEqual(
+                len(all_ev.stdout.splitlines()),
+                len(default.stdout.splitlines()),
+            )
+
+    def test_digest_output_is_not_json(self):
+        result = self._run("--month", "4", "--day", "13", "--digest")
+        self.assertEqual(result.returncode, 0)
+        # Should not be parseable as JSON
+        with self.assertRaises((json.JSONDecodeError, ValueError)):
+            json.loads(result.stdout)
+
+    def test_digest_combined_with_hermit_filter(self):
+        result = self._run(
+            "--month", "4", "--day", "13",
+            "--all-events", "--hermit", "Grian", "--digest",
+        )
+        # Exit 0 since Grian appears in events on this date
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("ON THIS DAY IN HERMITCRAFT", result.stdout)
+
+    def test_digest_and_pretty_are_independent(self):
+        # --digest should produce text; --pretty produces JSON array
+        digest_result = self._run("--month", "4", "--day", "13", "--digest")
+        pretty_result = self._run("--month", "4", "--day", "13", "--pretty")
+        self.assertIn("ON THIS DAY", digest_result.stdout)
+        # pretty output should be valid JSON
+        json.loads(pretty_result.stdout)
+
+    def test_digest_known_finale_date_s9(self):
+        # Dec 20 = Season 9 finale
+        result = self._run("--month", "12", "--day", "20", "--digest")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("event", result.stdout)
 
 
 if __name__ == "__main__":
