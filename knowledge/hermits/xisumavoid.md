@@ -5,6 +5,8 @@ youtube: https://www.youtube.com/user/xisumavoid
 hermitcraft_page: https://hermitcraft.com/xisumavoid
 joined_season: 1
 joined_year: 2012
+join_date: "2012-04-13"
+yt_channel_start: "2011"
 status: active
 role: server_admin
 nationality: British

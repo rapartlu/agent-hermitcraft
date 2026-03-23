@@ -5,6 +5,8 @@ youtube: https://www.youtube.com/user/docm77
 hermitcraft_page: https://hermitcraft.com/docm77
 joined_season: 3
 joined_year: 2015
+join_date: "2014-10"
+yt_channel_start: "2012"
 status: active
 nationality: Unknown (European)
 specialties:

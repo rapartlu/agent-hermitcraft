@@ -5,6 +5,7 @@ youtube: https://www.youtube.com/c/ZedaphPlays
 hermitcraft_page: https://hermitcraft.com/zedaphplays
 joined_season: 5
 joined_year: 2017
+join_date: "2017-04"
 status: active
 nationality: Unknown
 specialties:

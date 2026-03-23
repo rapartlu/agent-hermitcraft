@@ -5,6 +5,8 @@ youtube: https://www.youtube.com/user/TangoTekLP
 hermitcraft_page: https://hermitcraft.com/tangoteklp
 joined_season: 2
 joined_year: 2014
+join_date: "2014"
+yt_channel_start: "2011"
 status: active
 nationality: American
 specialties:

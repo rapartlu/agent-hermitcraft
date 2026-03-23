@@ -5,6 +5,8 @@ youtube: https://www.youtube.com/user/impulseSV
 hermitcraft_page: https://hermitcraft.com/impulsesv
 joined_season: 3
 joined_year: 2015
+join_date: "2014-10"
+yt_channel_start: "2013"
 status: active
 nationality: American
 specialties:

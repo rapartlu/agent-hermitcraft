@@ -5,6 +5,8 @@ youtube: https://www.youtube.com/user/hypnotizd
 hermitcraft_page: https://hermitcraft.com/hypnotizd
 joined_season: 1
 joined_year: 2012
+join_date: "2012-04-13"
+yt_channel_start: "2012"
 status: active
 nationality: Unknown
 specialties:

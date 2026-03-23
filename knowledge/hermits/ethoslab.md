@@ -5,6 +5,8 @@ youtube: https://www.youtube.com/user/EthosLab
 hermitcraft_page: https://hermitcraft.com/ethoslab
 joined_season: 3
 joined_year: 2015
+join_date: "2015-03"
+yt_channel_start: "2010"
 status: active
 nationality: Canadian
 specialties:

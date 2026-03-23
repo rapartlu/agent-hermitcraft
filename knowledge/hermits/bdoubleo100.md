@@ -5,6 +5,8 @@ youtube: https://www.youtube.com/user/bdoubleo
 hermitcraft_page: https://hermitcraft.com/bdoubleo100
 joined_season: 1
 joined_year: 2013
+join_date: "2013-01-05"
+yt_channel_start: "2011"
 status: active
 nationality: American
 specialties:

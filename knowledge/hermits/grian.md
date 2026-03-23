@@ -5,6 +5,8 @@ youtube: https://www.youtube.com/user/Xelqua
 hermitcraft_page: https://hermitcraft.com/grian
 joined_season: 6
 joined_year: 2018
+join_date: "2018-07-19"
+yt_channel_start: "2012"
 status: active
 nationality: British
 specialties:

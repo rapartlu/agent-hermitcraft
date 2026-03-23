@@ -11,9 +11,10 @@ Usage
   python3 tools/on_this_day.py --month 4 --day 13       # April 13 (server founding!)
   python3 tools/on_this_day.py --month 6 --day 17       # June 17 (Season 7 launch)
   python3 tools/on_this_day.py --window 3               # ±3 day window (default 7)
-  python3 tools/on_this_day.py --no-approximate         # exclude approximate-precision events
-  python3 tools/on_this_day.py --include-year           # include year-only events
-  python3 tools/on_this_day.py --pretty                 # indented JSON array output
+  python3 tools/on_this_day.py --no-approximate              # exclude approximate-precision events
+  python3 tools/on_this_day.py --include-year                # include year-only events
+  python3 tools/on_this_day.py --include-hermit-anniversaries  # add hermit join/YT anniversaries
+  python3 tools/on_this_day.py --pretty                      # indented JSON array output
 
 Date precision handling
 -----------------------
@@ -37,11 +38,13 @@ Exit codes
 
 import argparse
 import json
+import re
 import sys
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 EVENTS_FILE = Path(__file__).parent.parent / "knowledge" / "timelines" / "events.json"
+HERMITS_DIR = Path(__file__).parent.parent / "knowledge" / "hermits"
 
 # Day-of-year matching window in days (default)
 DEFAULT_WINDOW = 7
@@ -169,6 +172,123 @@ def find_on_this_day(
     return sorted(results, key=sort_key)
 
 
+def _parse_frontmatter(content: str) -> dict[str, str]:
+    """
+    Extract flat scalar fields from YAML frontmatter delimited by ``---``.
+
+    Only handles simple ``key: value`` lines (no lists, no nested mappings).
+    Quoted values have their surrounding quotes stripped.
+    """
+    if not content.startswith("---"):
+        return {}
+    end = content.find("\n---", 3)
+    if end == -1:
+        return {}
+    fm_text = content[4:end]
+    result: dict[str, str] = {}
+    for line in fm_text.splitlines():
+        # Skip list items, indented lines, and blank lines
+        if not line or line.startswith(" ") or line.startswith("-"):
+            continue
+        if ":" not in line:
+            continue
+        key, _, raw_value = line.partition(":")
+        value = raw_value.strip().strip('"').strip("'")
+        if value:
+            result[key.strip()] = value
+    return result
+
+
+def _infer_precision(date_str: str) -> str:
+    """Infer date_precision from a date string (YYYY, YYYY-MM, or YYYY-MM-DD)."""
+    parts = date_str.split("-")
+    if len(parts) == 3:
+        return "day"
+    if len(parts) == 2:
+        return "month"
+    return "year"
+
+
+def load_hermit_profiles(directory: Path = HERMITS_DIR) -> list[dict[str, str]]:
+    """
+    Scan ``knowledge/hermits/*.md`` and return a list of frontmatter dicts
+    for profiles that have at least a ``name`` field.
+    """
+    profiles: list[dict[str, str]] = []
+    if not directory.exists():
+        return profiles
+    for path in sorted(directory.glob("*.md")):
+        if path.name == "README.md":
+            continue
+        try:
+            fm = _parse_frontmatter(path.read_text())
+        except OSError:
+            continue
+        if fm.get("name"):
+            profiles.append(fm)
+    return profiles
+
+
+def synthesise_hermit_events(profiles: list[dict[str, str]]) -> list[dict]:
+    """
+    Build virtual event dicts from hermit profile frontmatter fields:
+
+    * ``join_date``         → "``{Name}`` Joins Hermitcraft" milestone
+    * ``yt_channel_start``  → "``{Name}`` Starts YouTube Channel" milestone
+
+    Synthesised events carry ``"source": "hermit_profile"`` so callers can
+    distinguish them from timeline data.
+    """
+    events: list[dict] = []
+    for fm in profiles:
+        name = fm.get("name", "")
+        slug = re.sub(r"[^a-z0-9]", "", name.lower())
+        joined_season_raw = fm.get("joined_season", "0")
+        try:
+            joined_season = int(joined_season_raw)
+        except ValueError:
+            joined_season = 0
+
+        join_date = fm.get("join_date", "")
+        if join_date:
+            precision = _infer_precision(join_date)
+            year_str = join_date.split("-")[0]
+            season_label = f"Season {joined_season}" if joined_season else "Hermitcraft"
+            events.append({
+                "id": f"hermit-{slug}-join",
+                "date": join_date,
+                "date_precision": precision,
+                "season": joined_season,
+                "hermits": [name],
+                "type": "milestone",
+                "title": f"{name} Joins Hermitcraft",
+                "description": (
+                    f"{name} joins Hermitcraft for the first time in {season_label} ({year_str})."
+                ),
+                "source": "hermit_profile",
+            })
+
+        yt_start = fm.get("yt_channel_start", "")
+        if yt_start:
+            precision = _infer_precision(yt_start)
+            events.append({
+                "id": f"hermit-{slug}-yt",
+                "date": yt_start,
+                "date_precision": precision,
+                "season": 0,
+                "hermits": [name],
+                "type": "milestone",
+                "title": f"{name} Starts YouTube Channel",
+                "description": (
+                    f"{name} creates their YouTube channel ({yt_start}),"
+                    " later becoming a member of Hermitcraft."
+                ),
+                "source": "hermit_profile",
+            })
+
+    return events
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="On This Day in Hermitcraft — historical event digest",
@@ -197,6 +317,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Include events that only have year-level precision.",
     )
     parser.add_argument(
+        "--include-hermit-anniversaries", action="store_true", default=False,
+        help=(
+            "Synthesise hermit join and YouTube-channel anniversary events "
+            "from hermit profiles and include them in results."
+        ),
+    )
+    parser.add_argument(
         "--pretty", action="store_true",
         help="Output a pretty-printed JSON array instead of NDJSON.",
     )
@@ -218,6 +345,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     events = load_events()
+
+    if args.include_hermit_anniversaries:
+        profiles = load_hermit_profiles()
+        events = events + synthesise_hermit_events(profiles)
 
     results = find_on_this_day(
         events,

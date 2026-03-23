@@ -5,6 +5,7 @@ youtube: https://www.youtube.com/c/PearlescentMoon
 hermitcraft_page: https://hermitcraft.com/pearlescentmoon
 joined_season: 8
 joined_year: 2021
+join_date: "2021"
 status: active
 nationality: Unknown (Australian)
 specialties:

@@ -5,6 +5,7 @@ youtube: https://www.youtube.com/c/FalseSymmetry
 hermitcraft_page: https://hermitcraft.com/falsesymmetry
 joined_season: 2
 joined_year: 2014
+join_date: "2014"
 status: active
 nationality: Unknown
 specialties:
