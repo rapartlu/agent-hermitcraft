@@ -20,9 +20,10 @@ from tools.season_recap import (
     _extract_first_paragraph,
     _event_sort_key,
     build_recap,
+    filter_by_hermit,
+    filter_timeline_by_month,
     format_text,
     format_timeline_text,
-    filter_timeline_by_month,
     load_season_file,
     load_events_for_season,
     SEASONS_DIR,
@@ -629,6 +630,134 @@ class TestCLITimeline(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Unit tests — filter_by_hermit
+# ---------------------------------------------------------------------------
+
+class TestFilterByHermit(unittest.TestCase):
+    EVENTS = [
+        {'id': 'all-1',   'hermits': ['All'],                 'title': 'Server-wide'},
+        {'id': 'grian-1', 'hermits': ['Grian'],               'title': 'Grian solo'},
+        {'id': 'duo-1',   'hermits': ['Grian', 'MumboJumbo'], 'title': 'Duo event'},
+        {'id': 'tango-1', 'hermits': ['TangoTek'],            'title': 'TangoTek solo'},
+        {'id': 'empty-1', 'hermits': [],                      'title': 'Unknown'},
+    ]
+
+    def test_all_event_always_included(self):
+        ids = [e['id'] for e in filter_by_hermit(self.EVENTS, 'Grian')]
+        self.assertIn('all-1', ids)
+
+    def test_named_hermit_included(self):
+        ids = [e['id'] for e in filter_by_hermit(self.EVENTS, 'Grian')]
+        self.assertIn('grian-1', ids)
+
+    def test_multi_hermit_event_included(self):
+        ids = [e['id'] for e in filter_by_hermit(self.EVENTS, 'Grian')]
+        self.assertIn('duo-1', ids)
+
+    def test_non_matching_hermit_excluded(self):
+        ids = [e['id'] for e in filter_by_hermit(self.EVENTS, 'Grian')]
+        self.assertNotIn('tango-1', ids)
+
+    def test_empty_hermit_list_excluded(self):
+        ids = [e['id'] for e in filter_by_hermit(self.EVENTS, 'Grian')]
+        self.assertNotIn('empty-1', ids)
+
+    def test_case_insensitive_lowercase(self):
+        lower = filter_by_hermit(self.EVENTS, 'grian')
+        proper = filter_by_hermit(self.EVENTS, 'Grian')
+        self.assertEqual([e['id'] for e in lower], [e['id'] for e in proper])
+
+    def test_case_insensitive_uppercase(self):
+        upper = filter_by_hermit(self.EVENTS, 'GRIAN')
+        proper = filter_by_hermit(self.EVENTS, 'Grian')
+        self.assertEqual([e['id'] for e in upper], [e['id'] for e in proper])
+
+    def test_unknown_hermit_returns_only_all_events(self):
+        results = filter_by_hermit(self.EVENTS, 'ZombieCleo')
+        ids = [e['id'] for e in results]
+        self.assertEqual(ids, ['all-1'])
+
+    def test_empty_event_list_returns_empty(self):
+        self.assertEqual(filter_by_hermit([], 'Grian'), [])
+
+    def test_tangotek_gets_solo_and_all(self):
+        ids = [e['id'] for e in filter_by_hermit(self.EVENTS, 'TangoTek')]
+        self.assertIn('tango-1', ids)
+        self.assertIn('all-1', ids)
+        self.assertNotIn('grian-1', ids)
+
+
+# ---------------------------------------------------------------------------
+# CLI tests — --hermit flag in season_recap
+# ---------------------------------------------------------------------------
+
+class TestCLIHermit(unittest.TestCase):
+    def _run(self, *args: str) -> tuple[int, str, str]:
+        result = subprocess.run(
+            [sys.executable, SCRIPT, *args],
+            capture_output=True, text=True,
+        )
+        return result.returncode, result.stdout, result.stderr
+
+    def test_hermit_flag_exits_0(self):
+        rc, _, _ = self._run('--season', '7', '--hermit', 'TangoTek')
+        self.assertEqual(rc, 0)
+
+    def test_hermit_implies_timeline_only(self):
+        _, stdout, _ = self._run('--season', '7', '--hermit', 'Grian')
+        # Should produce timeline output, not full recap
+        self.assertIn('TIMELINE', stdout)
+        self.assertNotIn('MEMBERS', stdout)
+
+    def test_hermit_label_in_header(self):
+        _, stdout, _ = self._run('--season', '7', '--hermit', 'TangoTek')
+        self.assertIn('TangoTek', stdout)
+
+    def test_hermit_json_contains_hermit_field(self):
+        rc, stdout, _ = self._run('--season', '7', '--hermit', 'Grian', '--json')
+        self.assertEqual(rc, 0)
+        data = json.loads(stdout)
+        self.assertEqual(data['hermit'], 'Grian')
+
+    def test_hermit_json_events_all_relevant(self):
+        _, stdout, _ = self._run('--season', '7', '--hermit', 'TangoTek', '--json')
+        data = json.loads(stdout)
+        for ev in data['events']:
+            hermits = ev.get('hermits', [])
+            self.assertTrue(
+                hermits == ['All']
+                or any(h.lower() == 'tangotek' for h in hermits),
+                f"Event has unexpected hermits: {hermits}",
+            )
+
+    def test_hermit_case_insensitive(self):
+        _, out_lower, _ = self._run('--season', '7', '--hermit', 'grian', '--json')
+        _, out_proper, _ = self._run('--season', '7', '--hermit', 'Grian', '--json')
+        data_lower = json.loads(out_lower)
+        data_proper = json.loads(out_proper)
+        self.assertEqual(data_lower['event_count'], data_proper['event_count'])
+
+    def test_hermit_combined_with_month(self):
+        rc, stdout, _ = self._run(
+            '--season', '7', '--hermit', 'TangoTek', '--month', '6', '--json'
+        )
+        self.assertEqual(rc, 0)
+        data = json.loads(stdout)
+        self.assertEqual(data['hermit'], 'TangoTek')
+        self.assertEqual(data['month'], 6)
+
+    def test_hermit_decked_out_tangotek_season7(self):
+        _, stdout, _ = self._run('--season', '7', '--hermit', 'TangoTek', '--json')
+        data = json.loads(stdout)
+        titles = [ev['title'] for ev in data['events']]
+        # Decked Out event specifically involves TangoTek
+        self.assertTrue(
+            any('Decked Out' in t or 'TangoTek' in t for t in titles),
+            f"Expected Decked Out event, got: {titles}",
+        )
+
+
+# ---------------------------------------------------------------------------
 # KNOWN_SEASONS constant
 # ---------------------------------------------------------------------------
 
@@ -671,6 +800,8 @@ if __name__ == '__main__':
         ('format_timeline_text', unittest.TestLoader().loadTestsFromTestCase(TestFormatTimelineText)),
         ('CLI', unittest.TestLoader().loadTestsFromTestCase(TestCLI)),
         ('CLI_timeline', unittest.TestLoader().loadTestsFromTestCase(TestCLITimeline)),
+        ('filter_by_hermit', unittest.TestLoader().loadTestsFromTestCase(TestFilterByHermit)),
+        ('CLI_hermit', unittest.TestLoader().loadTestsFromTestCase(TestCLIHermit)),
         ('constants', unittest.TestLoader().loadTestsFromTestCase(TestConstants)),
     ]
 

@@ -353,6 +353,28 @@ def synthesise_hermit_events(profiles: list[dict]) -> list[dict]:
     return events
 
 
+def filter_by_hermit(events: list[dict], hermit_name: str) -> list[dict]:
+    """
+    Return only those *events* that involve *hermit_name*.
+
+    An event matches when:
+    * ``event["hermits"]`` equals ``["All"]`` (server-wide events), OR
+    * *hermit_name* appears in ``event["hermits"]`` (case-insensitive).
+
+    An empty hermit list does **not** match, since the event's participants
+    are genuinely unknown.
+    """
+    name_lower = hermit_name.lower()
+    result = []
+    for ev in events:
+        hermits: list = ev.get("hermits", [])
+        if hermits == ["All"]:
+            result.append(ev)
+        elif any(h.lower() == name_lower for h in hermits):
+            result.append(ev)
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="On This Day in Hermitcraft — historical event digest",
@@ -404,6 +426,13 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--hermit", metavar="NAME", default=None,
+        help=(
+            "Filter results to events involving a specific hermit (case-insensitive). "
+            "Server-wide events (hermits=[All]) are always included."
+        ),
+    )
+    parser.add_argument(
         "--pretty", action="store_true",
         help="Output a pretty-printed JSON array instead of NDJSON.",
     )
@@ -447,6 +476,9 @@ def main(argv: list[str] | None = None) -> int:
         include_approximate=args.include_approximate,
         include_year=args.include_year,
     )
+
+    if args.hermit is not None:
+        results = filter_by_hermit(results, args.hermit)
 
     if not results:
         sys.stderr.write(
