@@ -758,6 +758,61 @@ class TestBuildDiscordEmbed(unittest.TestCase):
         embed = build_discord_embed(digest)
         self.assertIsInstance(embed, dict)
 
+    # Arc sentence splitting --------------------------------------------------
+
+    def test_arc_version_number_not_split(self):
+        """Minecraft version numbers like "1.16.2" must not be treated as sentence ends."""
+        digest = {
+            "season": 9, "stats": {}, "highlights": [],
+            "peak_moment": None, "collaborations": [],
+            "arc_summary": "Server launched on Minecraft 1.16.2. Players built many farms.",
+        }
+        embed = build_discord_embed(digest)
+        arc_field = next(
+            (f for f in embed["fields"] if "Arc" in f["name"]), None
+        )
+        self.assertIsNotNone(arc_field)
+        # The value must contain the version number intact
+        self.assertIn("1.16", arc_field["value"])
+
+    def test_arc_abbreviation_not_split(self):
+        """Abbreviations like 'e.g.' must not produce empty sentence fragments."""
+        digest = {
+            "season": 9, "stats": {}, "highlights": [],
+            "peak_moment": None, "collaborations": [],
+            "arc_summary": "Various events occurred, e.g. the Boatem Hole. Season ended well.",
+        }
+        embed = build_discord_embed(digest)
+        arc_field = next(
+            (f for f in embed["fields"] if "Arc" in f["name"]), None
+        )
+        self.assertIsNotNone(arc_field)
+        self.assertGreater(len(arc_field["value"].strip()), 0)
+
+    def test_arc_multiple_sentence_endings(self):
+        """Exclamation and question marks should also act as sentence boundaries."""
+        digest = {
+            "season": 9, "stats": {}, "highlights": [],
+            "peak_moment": None, "collaborations": [],
+            "arc_summary": "Amazing season! Who could forget the Boatem Hole? Third sentence here.",
+        }
+        embed = build_discord_embed(digest)
+        arc_field = next(
+            (f for f in embed["fields"] if "Arc" in f["name"]), None
+        )
+        self.assertIsNotNone(arc_field)
+        # Should include first two sentences only
+        self.assertIn("Amazing season", arc_field["value"])
+        self.assertIn("Boatem Hole", arc_field["value"])
+
+    def test_arc_empty_string_no_crash(self):
+        digest = {
+            "season": 9, "stats": {}, "highlights": [],
+            "peak_moment": None, "collaborations": [], "arc_summary": "",
+        }
+        embed = build_discord_embed(digest)
+        self.assertIsInstance(embed, dict)
+
 
 # ---------------------------------------------------------------------------
 # render_discord

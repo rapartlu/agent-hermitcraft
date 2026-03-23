@@ -39,6 +39,7 @@ import argparse
 import collections
 import itertools
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -635,9 +636,15 @@ def build_discord_embed(digest: dict) -> dict:
     )
     colour = _SEASON_COLOURS.get(season, _COLOUR_DEFAULT)
 
-    # Arc: trim to 2 sentences for embed brevity
-    arc_sentences = [s.strip() for s in arc.split(".") if s.strip()]
-    arc_short = ". ".join(arc_sentences[:2]) + ("." if arc_sentences else "")
+    # Arc: trim to 2 sentences for embed brevity.
+    # Use a lookbehind on sentence-ending punctuation + whitespace so that
+    # abbreviations (e.g. "1.16.2") and version numbers don't cause false splits.
+    arc_sentences = [
+        s.strip()
+        for s in re.split(r"(?<=[.!?])\s+", arc)
+        if s.strip()
+    ]
+    arc_short = " ".join(arc_sentences[:2])
     arc_value = _truncate(arc_short, _DISCORD_FIELD_VALUE_LIMIT)
 
     fields: list[dict] = [
