@@ -61,8 +61,16 @@ of the following are true:
    previous one (e.g. a decomposed sub-task vs the original monolithic task)
 
 If the previous task was `blocked` (infra failure), do **not** re-dispatch
-until the infrastructure issue is resolved.  Check `tools/rejection_classifier.py`
-to confirm the blocker has been removed.
+until the infrastructure issue is resolved.  Use `tools/rejection_classifier.py`
+(present in this repo, merged in PR #12) to confirm the blocker signal
+is no longer present in the environment before re-dispatching:
+
+```bash
+python tools/rejection_classifier.py \
+  --score 0.35 \
+  --notes "$(cat latest_task_result.txt)"
+# exits 0 (fixable/clear) or 1 (still infrastructure-blocked)
+```
 
 ---
 

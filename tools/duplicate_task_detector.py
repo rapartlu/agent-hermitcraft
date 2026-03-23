@@ -65,10 +65,15 @@ STOPWORDS = {
 }
 
 # Task statuses that block dispatch unconditionally (in-flight work).
+# Schema statuses: dispatched, in_progress.
+# "in-progress" and "running" are defensive aliases not in the schema.
 INFLIGHT_STATUSES = {"dispatched", "in_progress", "in-progress", "running"}
 
 # Task statuses that block dispatch only within the recency window.
-RECENT_STATUSES = {"done", "completed", "rejected", "blocked", "verified"}
+# Schema statuses: done, failed.
+# "completed", "rejected", "blocked", "verified" are defensive aliases
+# used by adjacent tools (verifier_score_adjuster, rejection_classifier).
+RECENT_STATUSES = {"done", "failed", "completed", "rejected", "blocked", "verified"}
 
 
 @dataclass
@@ -90,14 +95,20 @@ def extract_keywords(title: str) -> set:
 
 
 def extract_refs(text: str) -> set:
-    """Extract PR/issue/branch references from text (e.g. 'pull/10', '#10', 'pr-10')."""
+    """Extract PR/issue/branch references from text (e.g. 'pull/10', '#10', 'pr-10').
+
+    All issue variants ('issues/10', 'issue/10') are normalised to 'issue/N'
+    so they match each other regardless of pluralisation.
+    """
     refs = set()
     # GitHub-style: #10, PR #10, issue #10
     for m in re.finditer(r"#(\d+)", text.lower()):
         refs.add(f"#{m.group(1)}")
-    # URL-style: pull/10, issues/10
+    # URL-style: pull/10, issues/10, issue/10
+    # Normalise 'issues/N' → 'issue/N' for consistent matching.
     for m in re.finditer(r"(pull|issue[s]?)/(\d+)", text.lower()):
-        refs.add(f"{m.group(1)}/{m.group(2)}")
+        prefix = "issue" if m.group(1).startswith("issue") else m.group(1)
+        refs.add(f"{prefix}/{m.group(2)}")
     # Branch-style: pr-10, issue-10
     for m in re.finditer(r"(pr|issue)-(\d+)", text.lower()):
         refs.add(f"#{m.group(2)}")

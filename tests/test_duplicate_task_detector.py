@@ -77,9 +77,9 @@ for status in ["dispatched", "in_progress", "in-progress", "running"]:
 
 # ── Recent completions block within window ────────────────────────────────────
 
-print("Recency window (done/rejected/blocked):")
+print("Recency window (done/failed/rejected/blocked):")
 
-for status in ["done", "completed", "rejected", "blocked", "verified"]:
+for status in ["done", "failed", "completed", "rejected", "blocked", "verified"]:
     task = {"id": "t1", "title": "Fix PR #10 merge conflict",
             "status": status, "source_ref": "pull/10",
             "updated_at": ago_iso(hours=1)}  # 1h ago — within 4h window
@@ -87,26 +87,29 @@ for status in ["done", "completed", "rejected", "blocked", "verified"]:
     check(f"status='{status}' recent → blocks dispatch", r.is_duplicate,
           f"got is_duplicate={r.is_duplicate}")
 
-# Stale completed task (beyond window) should NOT block
-stale_task = {
-    "id": "t1", "title": "Fix PR #10 merge conflict",
-    "status": "done", "source_ref": "pull/10",
-    "updated_at": ago_iso(hours=RECENCY_WINDOW_HOURS + 1)
-}
-r = check_duplicate("Fix PR #10 merge conflict", [stale_task], "pull/10")
-check("stale done task (beyond window) does NOT block", not r.is_duplicate,
-      f"got is_duplicate={r.is_duplicate}")
+# Stale completed/failed tasks (beyond window) should NOT block
+for stale_status in ["done", "failed"]:
+    stale_task = {
+        "id": "t1", "title": "Fix PR #10 merge conflict",
+        "status": stale_status, "source_ref": "pull/10",
+        "updated_at": ago_iso(hours=RECENCY_WINDOW_HOURS + 1)
+    }
+    r = check_duplicate("Fix PR #10 merge conflict", [stale_task], "pull/10")
+    check(f"stale {stale_status} task (beyond window) does NOT block", not r.is_duplicate,
+          f"got is_duplicate={r.is_duplicate}")
 
 
 # ── Source-ref extraction ─────────────────────────────────────────────────────
 
 print("extract_refs:")
 
-check("extracts #10",        "#10"       in extract_refs("Fix issue #10"))
-check("extracts pull/10",    "pull/10"   in extract_refs("see pull/10"))
-check("extracts issues/5",   "issues/5"  in extract_refs("issues/5 blocked"))
-check("extracts pr-10 → #10","#10"       in extract_refs("pr-10 fix"))
-check("no refs → empty set", extract_refs("nothing to see here") == set())
+check("extracts #10",                  "#10"      in extract_refs("Fix issue #10"))
+check("extracts pull/10",              "pull/10"  in extract_refs("see pull/10"))
+check("extracts issues/5 → issue/5",   "issue/5"  in extract_refs("issues/5 blocked"))
+check("extracts issue/5 → issue/5",    "issue/5"  in extract_refs("issue/5 blocked"))
+check("issues/N and issue/N match",    extract_refs("issues/5") & extract_refs("issue/5") != set())
+check("extracts pr-10 → #10",          "#10"      in extract_refs("pr-10 fix"))
+check("no refs → empty set",           extract_refs("nothing to see here") == set())
 check("multiple refs",       len(extract_refs("PR #10 and #12")) == 2)
 
 
