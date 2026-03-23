@@ -2,6 +2,7 @@
 """Tests for tools/on_this_day.py"""
 
 import json
+import re
 import subprocess
 import sys
 import unittest
@@ -14,9 +15,13 @@ sys.path.insert(0, str(ROOT))
 
 from tools.on_this_day import (
     DEFAULT_WINDOW,
+    _infer_precision,
+    _parse_frontmatter,
     find_on_this_day,
     load_events,
+    load_hermit_profiles,
     matches_on_this_day,
+    synthesise_hermit_events,
     _circular_distance,
     _day_of_year,
     _parse_event_date,
@@ -361,6 +366,212 @@ class TestCLI(unittest.TestCase):
         r = self._run([])
         # Exit 0 (found events) or 1 (none today) — not 2 (error)
         self.assertIn(r.returncode, (0, 1))
+
+    def test_include_hermit_anniversaries_flag_no_crash(self):
+        r = self._run(["--month", "4", "--day", "13", "--include-hermit-anniversaries"])
+        # exit 0 (found) or 1 (none) — never 2 (error)
+        self.assertIn(r.returncode, (0, 1))
+
+    def test_include_hermit_anniversaries_surfaces_founding_join(self):
+        # April 13 is Xisumavoid's / Keralis's / Hypnotizd's join date
+        r = self._run([
+            "--month", "4", "--day", "13",
+            "--window", "0",
+            "--include-hermit-anniversaries",
+        ])
+        self.assertEqual(r.returncode, 0)
+        events = [json.loads(line) for line in r.stdout.strip().splitlines()]
+        ids = [e["id"] for e in events]
+        # At least one hermit join event for April 13 founding members
+        hermit_join_ids = [i for i in ids if i.startswith("hermit-") and i.endswith("-join")]
+        self.assertGreater(len(hermit_join_ids), 0, "Expected hermit join events on April 13")
+
+    def test_hermit_anniversary_source_field(self):
+        r = self._run([
+            "--month", "4", "--day", "13",
+            "--window", "0",
+            "--include-hermit-anniversaries",
+        ])
+        self.assertEqual(r.returncode, 0)
+        events = [json.loads(line) for line in r.stdout.strip().splitlines()]
+        hermit_events = [e for e in events if e.get("id", "").startswith("hermit-")]
+        for e in hermit_events:
+            self.assertEqual(e["source"], "hermit_profile")
+            self.assertEqual(e["type"], "milestone")
+
+    def test_anniversaries_absent_without_flag(self):
+        r = self._run(["--month", "4", "--day", "13", "--window", "0"])
+        self.assertEqual(r.returncode, 0)
+        events = [json.loads(line) for line in r.stdout.strip().splitlines()]
+        ids = [e["id"] for e in events]
+        self.assertFalse(any(i.startswith("hermit-") for i in ids))
+
+
+# ---------------------------------------------------------------------------
+# TestParseFrontmatter
+# ---------------------------------------------------------------------------
+
+class TestParseFrontmatter(unittest.TestCase):
+
+    def test_parses_scalar_fields(self):
+        content = "---\nname: Grian\njoined_season: 6\n---\n# Body"
+        fm = _parse_frontmatter(content)
+        self.assertEqual(fm["name"], "Grian")
+        self.assertEqual(fm["joined_season"], "6")
+
+    def test_strips_quotes(self):
+        content = '---\njoin_date: "2018-07-19"\nyt_channel_start: "2012"\n---\n'
+        fm = _parse_frontmatter(content)
+        self.assertEqual(fm["join_date"], "2018-07-19")
+        self.assertEqual(fm["yt_channel_start"], "2012")
+
+    def test_missing_frontmatter_returns_empty(self):
+        self.assertEqual(_parse_frontmatter("# No frontmatter"), {})
+
+    def test_unclosed_frontmatter_returns_empty(self):
+        self.assertEqual(_parse_frontmatter("---\nname: Grian\n"), {})
+
+    def test_skips_list_items(self):
+        content = "---\nname: Grian\nspecialties:\n  - building\n---\n"
+        fm = _parse_frontmatter(content)
+        self.assertIn("name", fm)
+        self.assertNotIn("specialties", fm)
+
+
+# ---------------------------------------------------------------------------
+# TestInferPrecision
+# ---------------------------------------------------------------------------
+
+class TestInferPrecision(unittest.TestCase):
+
+    def test_full_date_is_day(self):
+        self.assertEqual(_infer_precision("2012-04-13"), "day")
+
+    def test_year_month_is_month(self):
+        self.assertEqual(_infer_precision("2016-03"), "month")
+
+    def test_year_only_is_year(self):
+        self.assertEqual(_infer_precision("2013"), "year")
+
+
+# ---------------------------------------------------------------------------
+# TestSynthesiseHermitEvents
+# ---------------------------------------------------------------------------
+
+class TestSynthesiseHermitEvents(unittest.TestCase):
+
+    def _profile(self, **kwargs) -> dict:
+        base = {"name": "TestHermit", "joined_season": "7"}
+        base.update(kwargs)
+        return base
+
+    def test_join_date_creates_join_event(self):
+        profiles = [self._profile(join_date="2020-06-17")]
+        events = synthesise_hermit_events(profiles)
+        join_events = [e for e in events if e["id"].endswith("-join")]
+        self.assertEqual(len(join_events), 1)
+        e = join_events[0]
+        self.assertEqual(e["date"], "2020-06-17")
+        self.assertEqual(e["date_precision"], "day")
+        self.assertEqual(e["source"], "hermit_profile")
+        self.assertEqual(e["type"], "milestone")
+        self.assertIn("TestHermit", e["hermits"])
+
+    def test_yt_channel_start_creates_yt_event(self):
+        profiles = [self._profile(join_date="2020-06-17", yt_channel_start="2018")]
+        events = synthesise_hermit_events(profiles)
+        yt_events = [e for e in events if e["id"].endswith("-yt")]
+        self.assertEqual(len(yt_events), 1)
+        e = yt_events[0]
+        self.assertEqual(e["date"], "2018")
+        self.assertEqual(e["date_precision"], "year")
+        self.assertEqual(e["season"], 0)
+
+    def test_no_join_date_no_join_event(self):
+        profiles = [self._profile()]
+        events = synthesise_hermit_events(profiles)
+        self.assertFalse(any(e["id"].endswith("-join") for e in events))
+
+    def test_no_yt_channel_start_no_yt_event(self):
+        profiles = [self._profile(join_date="2020-06-17")]
+        events = synthesise_hermit_events(profiles)
+        self.assertFalse(any(e["id"].endswith("-yt") for e in events))
+
+    def test_month_precision_join_date(self):
+        profiles = [self._profile(join_date="2016-03")]
+        events = synthesise_hermit_events(profiles)
+        join_event = next(e for e in events if e["id"].endswith("-join"))
+        self.assertEqual(join_event["date_precision"], "month")
+
+    def test_multiple_profiles(self):
+        profiles = [
+            self._profile(name="Alpha", join_date="2012-04-13"),
+            self._profile(name="Beta",  join_date="2018-07-19"),
+        ]
+        events = synthesise_hermit_events(profiles)
+        ids = [e["id"] for e in events]
+        self.assertIn("hermit-alpha-join", ids)
+        self.assertIn("hermit-beta-join", ids)
+
+    def test_season_field_set_from_joined_season(self):
+        profiles = [self._profile(join_date="2016-03", joined_season="4")]
+        events = synthesise_hermit_events(profiles)
+        join_event = next(e for e in events if e["id"].endswith("-join"))
+        self.assertEqual(join_event["season"], 4)
+
+    def test_empty_profiles_returns_empty_list(self):
+        self.assertEqual(synthesise_hermit_events([]), [])
+
+
+# ---------------------------------------------------------------------------
+# TestHermitProfilesRealData
+# ---------------------------------------------------------------------------
+
+class TestHermitProfilesRealData(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.profiles = load_hermit_profiles()
+
+    def test_profiles_loaded(self):
+        self.assertGreater(len(self.profiles), 0)
+
+    def test_at_least_10_profiles_have_join_date(self):
+        with_join = [p for p in self.profiles if p.get("join_date")]
+        self.assertGreaterEqual(
+            len(with_join), 10,
+            f"Expected ≥10 profiles with join_date, found {len(with_join)}",
+        )
+
+    def test_join_date_format_is_valid(self):
+        """join_date values should be YYYY, YYYY-MM, or YYYY-MM-DD."""
+        pattern = re.compile(r"^\d{4}(-\d{2}(-\d{2})?)?$")
+        for p in self.profiles:
+            jd = p.get("join_date", "")
+            if jd:
+                self.assertRegex(jd, pattern, f"Bad join_date in profile {p.get('name')}")
+
+    def test_synthesised_events_are_matchable(self):
+        """Synthesised events for April 13 founding members should match."""
+        events = synthesise_hermit_events(self.profiles)
+        # Xisumavoid, Keralis, Hypnotizd all have join_date 2012-04-13
+        apr13_joins = [
+            e for e in events
+            if e.get("id", "").endswith("-join") and e.get("date") == "2012-04-13"
+        ]
+        self.assertGreaterEqual(len(apr13_joins), 3,
+            "Expected ≥3 join events for the April 13 founding date")
+
+    def test_xisumavoid_join_event_exists(self):
+        events = synthesise_hermit_events(self.profiles)
+        ids = [e["id"] for e in events]
+        self.assertIn("hermit-xisumavoid-join", ids)
+
+    def test_grian_join_event_has_correct_date(self):
+        events = synthesise_hermit_events(self.profiles)
+        grian_join = next((e for e in events if e["id"] == "hermit-grian-join"), None)
+        self.assertIsNotNone(grian_join)
+        self.assertEqual(grian_join["date"], "2018-07-19")
 
 
 if __name__ == "__main__":

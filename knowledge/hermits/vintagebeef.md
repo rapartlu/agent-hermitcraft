@@ -5,6 +5,8 @@ youtube: https://www.youtube.com/user/VintageBeef
 hermitcraft_page: https://hermitcraft.com/vintagebeef
 joined_season: 4
 joined_year: 2016
+join_date: "2016"
+yt_channel_start: "2012"
 status: active
 nationality: Canadian
 specialties:

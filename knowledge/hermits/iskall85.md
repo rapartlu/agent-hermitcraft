@@ -5,6 +5,8 @@ youtube: https://www.youtube.com/user/iskall85
 hermitcraft_page: https://hermitcraft.com/iskall85
 joined_season: 4
 joined_year: 2016
+join_date: "2016-03"
+yt_channel_start: "2013"
 status: active
 nationality: Swedish
 specialties:

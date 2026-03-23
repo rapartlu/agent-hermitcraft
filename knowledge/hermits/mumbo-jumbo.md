@@ -5,6 +5,8 @@ youtube: https://www.youtube.com/user/ThatMumboJumbo
 hermitcraft_page: https://hermitcraft.com/mumbojumbo
 joined_season: 2
 joined_year: 2013
+join_date: "2013"
+yt_channel_start: "2012"
 status: active
 nationality: British
 specialties:

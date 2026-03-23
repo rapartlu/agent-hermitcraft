@@ -5,6 +5,8 @@ youtube: https://www.youtube.com/c/GoodTimesWithScar
 hermitcraft_page: https://hermitcraft.com/goodtimeswithscar
 joined_season: 4
 joined_year: 2016
+join_date: "2016-03"
+yt_channel_start: "2014"
 status: active
 nationality: American
 specialties:

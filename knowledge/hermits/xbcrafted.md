@@ -5,6 +5,7 @@ youtube: https://www.youtube.com/c/xBCrafted
 hermitcraft_page: https://hermitcraft.com/xbcrafted
 joined_season: 2
 joined_year: 2013
+join_date: "2013"
 status: active
 nationality: Unknown (Canadian)
 specialties:
