@@ -4,7 +4,8 @@ tools/season_digest.py — Shareable "Season in Review" digest generator.
 Combines per-season highlights, collaborations, and a narrative arc summary
 into one ready-to-share document.  The markdown output can be pasted directly
 into a Discord message, a Reddit post, or a wiki page; the JSON output feeds
-downstream tools such as a Discord bot or static site generator.
+downstream tools such as a Discord bot or static site generator; the Discord
+embed output can be POSTed directly to a Discord webhook.
 
 Sections in every digest:
   1. Quick stats  — date range, hermit count, event-type breakdown
@@ -17,12 +18,18 @@ Sections in every digest:
 Output modes:
   --markdown  (default)  Ready-to-paste .md document with headers / bullets
   --json                 Structured dict for downstream tooling
+  --discord              Discord embed JSON payload (POST to a webhook directly)
+
+Discord embed limits enforced automatically:
+  Field value  ≤ 1 024 chars   Embed title ≤ 256 chars
+  Total embed  ≤ 6 000 chars   Truncated with … rather than hard-cut
 
 Usage:
     python -m tools.season_digest --season 9
     python -m tools.season_digest --season 9 --top 3
     python -m tools.season_digest --season 9 --json
     python -m tools.season_digest --season 9 --markdown
+    python -m tools.season_digest --season 9 --discord
     python -m tools.season_digest --list
 """
 
@@ -455,6 +462,259 @@ def render_markdown(digest: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Discord embed renderer
+# ---------------------------------------------------------------------------
+
+# Discord API hard limits
+_DISCORD_TITLE_LIMIT: int = 256
+_DISCORD_FIELD_VALUE_LIMIT: int = 1024
+_DISCORD_EMBED_TOTAL_LIMIT: int = 6000
+_DISCORD_FIELD_NAME_LIMIT: int = 256
+
+# One distinct colour per season (decimal RGB, matching Discord's colour int).
+# Chosen to be visually distinct across the 11 seasons.
+_SEASON_COLOURS: dict[int, int] = {
+    1:  0x1ABC9C,   # teal          — founding era
+    2:  0x2ECC71,   # green
+    3:  0x3498DB,   # blue
+    4:  0x9B59B6,   # purple
+    5:  0xE91E63,   # pink
+    6:  0xF39C12,   # orange        — "golden age" begins
+    7:  0xE74C3C,   # red
+    8:  0x1E88E5,   # bright blue   — Demise / Last Life cross-over era
+    9:  0x00BCD4,   # cyan          — longest season ever
+    10: 0x8BC34A,   # lime green
+    11: 0x7E57C2,   # indigo
+}
+_COLOUR_DEFAULT: int = 0x99AAB5  # Discord grey fallback
+
+
+def _truncate(text: str, max_len: int, suffix: str = " …") -> str:
+    """Return *text* truncated to *max_len* chars, appending *suffix* if cut.
+
+    Truncation is word-aware: the cut happens at the last space before the
+    limit so words are never split mid-character.
+    """
+    if len(text) <= max_len:
+        return text
+    cut_at = max_len - len(suffix)
+    # Walk back to a word boundary
+    boundary = text.rfind(" ", 0, cut_at)
+    if boundary <= 0:
+        boundary = cut_at
+    return text[:boundary] + suffix
+
+
+def _discord_stats_value(stats: dict) -> str:
+    """Compact stats line for a Discord embed field value."""
+    date_start = stats.get("date_start") or "unknown"
+    date_end = stats.get("date_end") or "unknown"
+    hermit_count = stats.get("hermit_count", 0)
+    event_count = stats.get("event_count", 0)
+    breakdown = stats.get("type_breakdown", {})
+
+    lines = [
+        f"📅 {date_start} → {date_end}",
+        f"👥 {hermit_count} hermits · {event_count} documented events",
+    ]
+    if breakdown:
+        top_types = sorted(breakdown.items(), key=lambda x: -x[1])[:3]
+        lines.append("📊 " + ", ".join(f"{t}: {c}" for t, c in top_types))
+
+    return "\n".join(lines)
+
+
+def _discord_peak_value(peak: dict) -> str:
+    """One-block peak-moment field value."""
+    title = peak.get("title", "(untitled)")
+    score = peak.get("significance_score", 0)
+    date = peak.get("date", "")
+    hermits = peak.get("hermits", [])
+    desc = peak.get("description", "")
+
+    hermit_str = "All hermits" if hermits == ["All"] else ", ".join(hermits[:3])
+    header = f"**{title}** *(score: {score})*"
+    meta = f"{date} · {hermit_str}" if date else hermit_str
+
+    parts = [header, meta]
+    if desc:
+        # Trim description to fit remaining budget in the field
+        budget = _DISCORD_FIELD_VALUE_LIMIT - len(header) - len(meta) - 4
+        if budget > 40:
+            parts.append(_truncate(desc, budget))
+
+    return "\n".join(p for p in parts if p)
+
+
+def _discord_highlights_value(highlights: list[dict]) -> str:
+    """Numbered list of highlights, truncated to fit the field limit."""
+    lines: list[str] = []
+    for entry in highlights:
+        rank = entry["rank"]
+        title = entry["title"]
+        ev_type = entry.get("type", "")
+        score = entry.get("significance_score", 0)
+        type_tag = f" `{ev_type}`" if ev_type else ""
+        line = f"{rank}. **{title}**{type_tag} *(score: {score})*"
+        # Add line only while we stay within the limit
+        candidate = "\n".join(lines + [line])
+        if len(candidate) > _DISCORD_FIELD_VALUE_LIMIT - 4:
+            lines.append(" …")
+            break
+        lines.append(line)
+    return "\n".join(lines) if lines else "*No highlights available.*"
+
+
+def _discord_collabs_value(collabs: list[dict]) -> str:
+    """Bullet list of top collaborating pairs."""
+    if not collabs:
+        return "*No multi-hermit collaborations recorded.*"
+    lines: list[str] = []
+    for entry in collabs:
+        a = entry["hermit_a"]
+        b = entry["hermit_b"]
+        count = entry["shared_event_count"]
+        plural = "s" if count != 1 else ""
+        titles = entry.get("event_titles", [])
+        title_note = f" — {titles[0]}" if titles else ""
+        line = f"• **{a} & {b}**: {count} event{plural}{title_note}"
+        candidate = "\n".join(lines + [line])
+        if len(candidate) > _DISCORD_FIELD_VALUE_LIMIT - 4:
+            lines.append(" …")
+            break
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def build_discord_embed(digest: dict) -> dict:
+    """
+    Build a Discord embed dict from *digest*.
+
+    The returned dict is a single embed object (not the outer ``{"embeds": […]}``
+    wrapper) so callers can compose multiple embeds if needed.
+
+    All field values are guaranteed to be ≤ ``_DISCORD_FIELD_VALUE_LIMIT``
+    characters.  The function also trims the total embed character count to
+    stay within ``_DISCORD_EMBED_TOTAL_LIMIT``.
+
+    Structure::
+
+        {
+            "title":  "🏆 Hermitcraft Season N — Season in Review",
+            "color":  <int>,
+            "fields": [
+                {"name": "📊 Quick Stats",         "value": "…", "inline": False},
+                {"name": "📖 Season Arc",           "value": "…", "inline": False},
+                {"name": "🌟 Peak Moment",          "value": "…", "inline": False},
+                {"name": "🏅 Top Highlights",       "value": "…", "inline": False},
+                {"name": "🤝 Notable Collaborations","value": "…", "inline": False},
+            ],
+            "footer": {"text": "hermitcraft-agent • /digest season N"},
+        }
+    """
+    season = digest["season"]
+    stats = digest.get("stats", {})
+    highlights = digest.get("highlights", [])
+    peak = digest.get("peak_moment")
+    collabs = digest.get("collaborations", [])
+    arc = digest.get("arc_summary", "")
+
+    title = _truncate(
+        f"🏆 Hermitcraft Season {season} — Season in Review",
+        _DISCORD_TITLE_LIMIT,
+    )
+    colour = _SEASON_COLOURS.get(season, _COLOUR_DEFAULT)
+
+    # Arc: trim to 2 sentences for embed brevity
+    arc_sentences = [s.strip() for s in arc.split(".") if s.strip()]
+    arc_short = ". ".join(arc_sentences[:2]) + ("." if arc_sentences else "")
+    arc_value = _truncate(arc_short, _DISCORD_FIELD_VALUE_LIMIT)
+
+    fields: list[dict] = [
+        {
+            "name": "📊 Quick Stats",
+            "value": _truncate(_discord_stats_value(stats),
+                                _DISCORD_FIELD_VALUE_LIMIT),
+            "inline": False,
+        },
+        {
+            "name": "📖 Season Arc",
+            "value": arc_value or "*No arc summary available.*",
+            "inline": False,
+        },
+    ]
+
+    if peak:
+        fields.append(
+            {
+                "name": "🌟 Peak Moment",
+                "value": _truncate(_discord_peak_value(peak),
+                                   _DISCORD_FIELD_VALUE_LIMIT),
+                "inline": False,
+            }
+        )
+
+    if highlights:
+        fields.append(
+            {
+                "name": f"🏅 Top {len(highlights)} Highlights",
+                "value": _discord_highlights_value(highlights),
+                "inline": False,
+            }
+        )
+
+    fields.append(
+        {
+            "name": "🤝 Notable Collaborations",
+            "value": _discord_collabs_value(collabs),
+            "inline": False,
+        }
+    )
+
+    embed: dict = {
+        "title": title,
+        "color": colour,
+        "fields": fields,
+        "footer": {"text": f"hermitcraft-agent • /digest season {season}"},
+    }
+
+    # ── Safety trim: ensure total character count ≤ embed limit ─────────────
+    # Count: title + all field names + all field values + footer text
+    def _embed_char_count(e: dict) -> int:
+        total = len(e.get("title", ""))
+        for f in e.get("fields", []):
+            total += len(f.get("name", "")) + len(f.get("value", ""))
+        total += len(e.get("footer", {}).get("text", ""))
+        return total
+
+    # If over limit, progressively shorten the longest field values
+    while _embed_char_count(embed) > _DISCORD_EMBED_TOTAL_LIMIT and embed["fields"]:
+        # Find the field with the longest value and shorten it
+        longest = max(embed["fields"], key=lambda f: len(f["value"]))
+        if len(longest["value"]) <= 50:
+            # Nothing meaningful left to trim; remove the field instead
+            embed["fields"].remove(longest)
+        else:
+            longest["value"] = _truncate(
+                longest["value"],
+                len(longest["value"]) - 100,
+            )
+
+    return embed
+
+
+def render_discord(digest: dict) -> str:
+    """
+    Render *digest* as a Discord webhook-ready JSON string.
+
+    The output is the ``{"embeds": […]}`` wrapper expected by the Discord
+    webhook API — pipe it straight to ``curl -d @- <webhook_url>``.
+    """
+    embed = build_discord_embed(digest)
+    return json.dumps({"embeds": [embed]}, indent=2, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -500,6 +760,16 @@ def _build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Output as JSON",
     )
+    fmt_group.add_argument(
+        "--discord",
+        action="store_true",
+        default=False,
+        help=(
+            "Output as a Discord embed JSON payload — POST directly to a "
+            "webhook.  Field values are automatically trimmed to Discord's "
+            "1 024-char limit; total embed stays under 6 000 chars."
+        ),
+    )
     return p
 
 
@@ -524,6 +794,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.json:
         print(json.dumps(digest, indent=2))
+    elif args.discord:
+        print(render_discord(digest))
     else:
         # --markdown is default when neither flag is given
         print(render_markdown(digest))

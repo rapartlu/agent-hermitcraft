@@ -13,13 +13,20 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tools.season_digest import (
     KNOWN_SEASONS,
+    _DISCORD_EMBED_TOTAL_LIMIT,
+    _DISCORD_FIELD_VALUE_LIMIT,
+    _DISCORD_TITLE_LIMIT,
+    _SEASON_COLOURS,
     _significance_score,
-    build_stats,
+    _truncate,
+    build_collaborations,
+    build_digest,
+    build_discord_embed,
     build_highlights,
     build_peak_moment,
-    build_collaborations,
+    build_stats,
     build_arc_summary,
-    build_digest,
+    render_discord,
     render_markdown,
     main,
 )
@@ -574,6 +581,310 @@ class TestCLI(unittest.TestCase):
     def test_sparse_season_no_crash(self):
         rc, _, _ = _run(["--season", "1"])
         self.assertEqual(rc, 0)
+
+
+# ---------------------------------------------------------------------------
+# _truncate helper
+# ---------------------------------------------------------------------------
+
+class TestTruncate(unittest.TestCase):
+
+    def test_short_string_unchanged(self):
+        self.assertEqual(_truncate("hello", 20), "hello")
+
+    def test_exact_length_unchanged(self):
+        self.assertEqual(_truncate("hello", 5), "hello")
+
+    def test_long_string_truncated(self):
+        result = _truncate("hello world foo bar", 10)
+        self.assertLessEqual(len(result), 10)
+
+    def test_suffix_appended_when_cut(self):
+        result = _truncate("hello world", 8)
+        self.assertTrue(result.endswith(" …"))
+
+    def test_word_boundary_respected(self):
+        # "hello world" → should cut after "hello" not mid-"world"
+        result = _truncate("hello world this is long", 12)
+        self.assertNotIn("wor", result.split(" …")[0].split()[-1][:3])
+
+    def test_custom_suffix(self):
+        result = _truncate("hello world", 8, suffix="...")
+        self.assertTrue(result.endswith("..."))
+
+    def test_empty_string(self):
+        self.assertEqual(_truncate("", 10), "")
+
+
+# ---------------------------------------------------------------------------
+# build_discord_embed
+# ---------------------------------------------------------------------------
+
+class TestBuildDiscordEmbed(unittest.TestCase):
+
+    def _embed(self, season: int = 9) -> dict:
+        return build_discord_embed(build_digest(season))
+
+    # Structure ---------------------------------------------------------------
+
+    def test_returns_dict(self):
+        self.assertIsInstance(self._embed(), dict)
+
+    def test_has_title(self):
+        self.assertIn("title", self._embed())
+
+    def test_has_color(self):
+        self.assertIn("color", self._embed())
+
+    def test_has_fields_list(self):
+        embed = self._embed()
+        self.assertIn("fields", embed)
+        self.assertIsInstance(embed["fields"], list)
+
+    def test_has_footer(self):
+        self.assertIn("footer", self._embed())
+
+    def test_footer_has_text(self):
+        self.assertIn("text", self._embed()["footer"])
+
+    def test_title_contains_season_number(self):
+        self.assertIn("9", self._embed(9)["title"])
+
+    def test_footer_contains_season_number(self):
+        self.assertIn("9", self._embed(9)["footer"]["text"])
+
+    # Limits ------------------------------------------------------------------
+
+    def test_title_within_limit(self):
+        self.assertLessEqual(len(self._embed()["title"]), _DISCORD_TITLE_LIMIT)
+
+    def test_all_field_values_within_limit(self):
+        for field in self._embed()["fields"]:
+            self.assertLessEqual(
+                len(field["value"]),
+                _DISCORD_FIELD_VALUE_LIMIT,
+                f"Field '{field['name']}' exceeds value limit",
+            )
+
+    def test_total_embed_chars_within_limit(self):
+        embed = self._embed()
+        total = len(embed.get("title", ""))
+        for f in embed.get("fields", []):
+            total += len(f.get("name", "")) + len(f.get("value", ""))
+        total += len(embed.get("footer", {}).get("text", ""))
+        self.assertLessEqual(total, _DISCORD_EMBED_TOTAL_LIMIT)
+
+    def test_limits_hold_for_all_seasons(self):
+        for s in KNOWN_SEASONS:
+            embed = self._embed(s)
+            # title limit
+            self.assertLessEqual(len(embed["title"]), _DISCORD_TITLE_LIMIT,
+                                 f"Season {s} title over limit")
+            # field value limits
+            for f in embed["fields"]:
+                self.assertLessEqual(len(f["value"]), _DISCORD_FIELD_VALUE_LIMIT,
+                                     f"Season {s} field '{f['name']}' over limit")
+            # total limit
+            total = len(embed.get("title", ""))
+            for f in embed.get("fields", []):
+                total += len(f.get("name", "")) + len(f.get("value", ""))
+            total += len(embed.get("footer", {}).get("text", ""))
+            self.assertLessEqual(total, _DISCORD_EMBED_TOTAL_LIMIT,
+                                 f"Season {s} total embed over limit")
+
+    # Content -----------------------------------------------------------------
+
+    def test_fields_nonempty(self):
+        self.assertGreater(len(self._embed()["fields"]), 0)
+
+    def test_quick_stats_field_present(self):
+        names = [f["name"] for f in self._embed()["fields"]]
+        self.assertTrue(any("Stats" in n for n in names))
+
+    def test_season_arc_field_present(self):
+        names = [f["name"] for f in self._embed()["fields"]]
+        self.assertTrue(any("Arc" in n for n in names))
+
+    def test_peak_moment_field_present_when_data_exists(self):
+        names = [f["name"] for f in self._embed(9)["fields"]]
+        self.assertTrue(any("Peak" in n for n in names))
+
+    def test_highlights_field_present(self):
+        names = [f["name"] for f in self._embed(9)["fields"]]
+        self.assertTrue(any("Highlight" in n for n in names))
+
+    def test_collaborations_field_present(self):
+        names = [f["name"] for f in self._embed()["fields"]]
+        self.assertTrue(any("Collab" in n for n in names))
+
+    def test_colour_distinct_per_season(self):
+        # Each season should get a unique colour integer
+        colours = [build_discord_embed(build_digest(s))["color"]
+                   for s in KNOWN_SEASONS]
+        self.assertEqual(len(colours), len(set(colours)),
+                         "Two seasons share the same embed colour")
+
+    def test_all_fields_have_inline_key(self):
+        for field in self._embed()["fields"]:
+            self.assertIn("inline", field)
+
+    def test_field_name_within_limit(self):
+        for field in self._embed()["fields"]:
+            self.assertLessEqual(len(field["name"]), _DISCORD_FIELD_VALUE_LIMIT)
+
+    def test_no_empty_field_values(self):
+        for field in self._embed()["fields"]:
+            self.assertGreater(len(field["value"].strip()), 0,
+                               f"Field '{field['name']}' has empty value")
+
+    def test_json_serialisable(self):
+        serialised = json.dumps(self._embed())
+        self.assertIsInstance(serialised, str)
+
+    # Season with no peak moment (all-empty digest) ---------------------------
+
+    def test_no_peak_moment_no_crash(self):
+        digest = build_digest(9)
+        digest["peak_moment"] = None
+        embed = build_discord_embed(digest)
+        self.assertIsInstance(embed, dict)
+
+    def test_empty_digest_no_crash(self):
+        digest = {
+            "season": 9, "stats": {}, "highlights": [],
+            "peak_moment": None, "collaborations": [], "arc_summary": "",
+        }
+        embed = build_discord_embed(digest)
+        self.assertIsInstance(embed, dict)
+
+
+# ---------------------------------------------------------------------------
+# render_discord
+# ---------------------------------------------------------------------------
+
+class TestRenderDiscord(unittest.TestCase):
+
+    def _payload(self, season: int = 9) -> dict:
+        return json.loads(render_discord(build_digest(season)))
+
+    def test_returns_string(self):
+        self.assertIsInstance(render_discord(build_digest(9)), str)
+
+    def test_valid_json(self):
+        raw = render_discord(build_digest(9))
+        self.assertIsInstance(json.loads(raw), dict)
+
+    def test_outer_key_is_embeds(self):
+        payload = self._payload()
+        self.assertIn("embeds", payload)
+
+    def test_embeds_is_list(self):
+        self.assertIsInstance(self._payload()["embeds"], list)
+
+    def test_exactly_one_embed(self):
+        self.assertEqual(len(self._payload()["embeds"]), 1)
+
+    def test_embed_has_title(self):
+        self.assertIn("title", self._payload()["embeds"][0])
+
+    def test_embed_has_fields(self):
+        self.assertIn("fields", self._payload()["embeds"][0])
+
+
+# ---------------------------------------------------------------------------
+# CLI — --discord flag
+# ---------------------------------------------------------------------------
+
+class TestCLIDiscord(unittest.TestCase):
+
+    def test_discord_exits_0(self):
+        rc, _, _ = _run(["--season", "9", "--discord"])
+        self.assertEqual(rc, 0)
+
+    def test_discord_produces_valid_json(self):
+        _, out, _ = _run(["--season", "9", "--discord"])
+        data = json.loads(out)
+        self.assertIsInstance(data, dict)
+
+    def test_discord_outer_key_embeds(self):
+        _, out, _ = _run(["--season", "9", "--discord"])
+        data = json.loads(out)
+        self.assertIn("embeds", data)
+
+    def test_discord_embed_title_present(self):
+        _, out, _ = _run(["--season", "9", "--discord"])
+        data = json.loads(out)
+        self.assertIn("title", data["embeds"][0])
+
+    def test_discord_season_in_title(self):
+        _, out, _ = _run(["--season", "9", "--discord"])
+        data = json.loads(out)
+        self.assertIn("9", data["embeds"][0]["title"])
+
+    def test_discord_field_values_within_limit(self):
+        _, out, _ = _run(["--season", "9", "--discord"])
+        data = json.loads(out)
+        for field in data["embeds"][0]["fields"]:
+            self.assertLessEqual(len(field["value"]), _DISCORD_FIELD_VALUE_LIMIT)
+
+    def test_discord_total_chars_within_limit(self):
+        _, out, _ = _run(["--season", "9", "--discord"])
+        embed = json.loads(out)["embeds"][0]
+        total = len(embed.get("title", ""))
+        for f in embed.get("fields", []):
+            total += len(f.get("name", "")) + len(f.get("value", ""))
+        total += len(embed.get("footer", {}).get("text", ""))
+        self.assertLessEqual(total, _DISCORD_EMBED_TOTAL_LIMIT)
+
+    def test_discord_mutually_exclusive_with_json(self):
+        rc, _, _ = _run(["--season", "9", "--discord", "--json"])
+        self.assertNotEqual(rc, 0)
+
+    def test_discord_mutually_exclusive_with_markdown(self):
+        rc, _, _ = _run(["--season", "9", "--discord", "--markdown"])
+        self.assertNotEqual(rc, 0)
+
+    def test_discord_top_flag_respected(self):
+        _, out, _ = _run(["--season", "9", "--discord", "--top", "2"])
+        data = json.loads(out)
+        fields = data["embeds"][0]["fields"]
+        highlight_field = next(
+            (f for f in fields if "Highlight" in f["name"]), None
+        )
+        if highlight_field:
+            # At most 2 numbered entries; "…" is allowed as a trailing line
+            numbered = [ln for ln in highlight_field["value"].splitlines()
+                        if ln and ln[0].isdigit()]
+            self.assertLessEqual(len(numbered), 2)
+
+    def test_discord_unknown_season_exits_1(self):
+        rc, _, err = _run(["--season", "999", "--discord"])
+        self.assertEqual(rc, 1)
+
+    def test_discord_all_seasons_exit_0(self):
+        for s in KNOWN_SEASONS:
+            rc, _, _ = _run(["--season", str(s), "--discord"])
+            self.assertEqual(rc, 0, f"Season {s} exited nonzero with --discord")
+
+    def test_discord_sparse_season_no_crash(self):
+        rc, out, _ = _run(["--season", "1", "--discord"])
+        self.assertEqual(rc, 0)
+        data = json.loads(out)
+        self.assertIn("embeds", data)
+
+    # Season colours ----------------------------------------------------------
+
+    def test_season_colour_all_11_defined(self):
+        self.assertEqual(len(_SEASON_COLOURS), 11)
+
+    def test_all_season_colours_positive_ints(self):
+        for s, c in _SEASON_COLOURS.items():
+            self.assertIsInstance(c, int)
+            self.assertGreater(c, 0, f"Season {s} colour must be positive")
+
+    def test_season_colours_all_distinct(self):
+        colours = list(_SEASON_COLOURS.values())
+        self.assertEqual(len(colours), len(set(colours)))
 
 
 if __name__ == "__main__":
