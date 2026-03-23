@@ -9,6 +9,12 @@ This is a self-learning Hermitcraft knowledge agent. You (Claude) are the agent.
 - **All changes go through PRs.** Never commit directly to main.
 - **Every PR starts with a GitHub issue.** Create the issue first, then branch + PR.
 - **Branch naming:** `<type>/<short-description>` (e.g., `research/season-10-hermits`, `fix/grian-spelling`)
+- **Rebase on main before opening a PR.** Immediately before running `gh pr create`, always run:
+  ```
+  git fetch origin
+  git rebase origin/main
+  ```
+  This prevents merge conflicts from accumulating and keeps the PR diff clean.
 - **The orchestrator reviews PRs** via comments on the same GitHub account. Address all comments before merging.
 - **Keep PRs focused.** One topic or improvement per PR.
 
