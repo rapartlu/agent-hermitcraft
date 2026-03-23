@@ -538,7 +538,12 @@ def _discord_peak_value(peak: dict) -> str:
 
     parts = [header, meta]
     if desc:
-        # Trim description to fit remaining budget in the field
+        # Trim description to fit the remaining character budget.
+        # Note: if header + meta already exceed the field limit, budget goes
+        # negative and the description is simply skipped (budget ≤ 40 guard).
+        # The caller always wraps the return value in _truncate(...,
+        # _DISCORD_FIELD_VALUE_LIMIT) as a final clamp, so the hard limit is
+        # always honoured regardless.
         budget = _DISCORD_FIELD_VALUE_LIMIT - len(header) - len(meta) - 4
         if budget > 40:
             parts.append(_truncate(desc, budget))
@@ -546,8 +551,12 @@ def _discord_peak_value(peak: dict) -> str:
     return "\n".join(p for p in parts if p)
 
 
-def _discord_highlights_value(highlights: list[dict]) -> str:
-    """Numbered list of highlights, truncated to fit the field limit."""
+def _discord_highlights_value(highlights: list[dict]) -> tuple[str, int]:
+    """Numbered list of highlights, truncated to fit the field limit.
+
+    Returns a ``(text, rendered_count)`` tuple so callers can label the field
+    accurately even when the list is cut short by the character budget.
+    """
     lines: list[str] = []
     for entry in highlights:
         rank = entry["rank"]
@@ -562,7 +571,8 @@ def _discord_highlights_value(highlights: list[dict]) -> str:
             lines.append(" …")
             break
         lines.append(line)
-    return "\n".join(lines) if lines else "*No highlights available.*"
+    text = "\n".join(lines) if lines else "*No highlights available.*"
+    return text, len(lines)
 
 
 def _discord_collabs_value(collabs: list[dict]) -> str:
@@ -655,10 +665,13 @@ def build_discord_embed(digest: dict) -> dict:
         )
 
     if highlights:
+        highlights_text, rendered_count = _discord_highlights_value(highlights)
         fields.append(
             {
-                "name": f"🏅 Top {len(highlights)} Highlights",
-                "value": _discord_highlights_value(highlights),
+                # Use the *rendered* count, not len(highlights), so the label
+                # stays accurate when the character budget truncates the list.
+                "name": f"🏅 Top {rendered_count} Highlights",
+                "value": highlights_text,
                 "inline": False,
             }
         )
@@ -699,6 +712,14 @@ def build_discord_embed(digest: dict) -> dict:
                 longest["value"],
                 len(longest["value"]) - 100,
             )
+
+    # Last resort: if title + footer alone exceed the limit (pathological case
+    # where all fields have been stripped), clamp title so the embed always
+    # satisfies the Discord total-character constraint.
+    if _embed_char_count(embed) > _DISCORD_EMBED_TOTAL_LIMIT:
+        footer_text = embed.get("footer", {}).get("text", "")
+        remaining = _DISCORD_EMBED_TOTAL_LIMIT - len(footer_text)
+        embed["title"] = _truncate(embed["title"], max(10, remaining))
 
     return embed
 

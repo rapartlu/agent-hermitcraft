@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from tools.season_digest import (
     KNOWN_SEASONS,
     _DISCORD_EMBED_TOTAL_LIMIT,
+    _DISCORD_FIELD_NAME_LIMIT,
     _DISCORD_FIELD_VALUE_LIMIT,
     _DISCORD_TITLE_LIMIT,
     _SEASON_COLOURS,
@@ -730,7 +731,7 @@ class TestBuildDiscordEmbed(unittest.TestCase):
 
     def test_field_name_within_limit(self):
         for field in self._embed()["fields"]:
-            self.assertLessEqual(len(field["name"]), _DISCORD_FIELD_VALUE_LIMIT)
+            self.assertLessEqual(len(field["name"]), _DISCORD_FIELD_NAME_LIMIT)
 
     def test_no_empty_field_values(self):
         for field in self._embed()["fields"]:
