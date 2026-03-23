@@ -18,8 +18,11 @@ from tools.season_recap import (
     _extract_bullet_list,
     _extract_members_from_text,
     _extract_first_paragraph,
+    _event_sort_key,
     build_recap,
     format_text,
+    format_timeline_text,
+    filter_timeline_by_month,
     load_season_file,
     load_events_for_season,
     SEASONS_DIR,
@@ -408,6 +411,224 @@ class TestCLI(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Unit tests — _event_sort_key
+# ---------------------------------------------------------------------------
+
+class TestEventSortKey(unittest.TestCase):
+    def test_full_date_sorts_correctly(self):
+        a = {'date': '2020-02-28', 'date_precision': 'day'}
+        b = {'date': '2020-06-23', 'date_precision': 'day'}
+        self.assertLess(_event_sort_key(a), _event_sort_key(b))
+
+    def test_year_only_sorts_before_month(self):
+        year_event = {'date': '2020', 'date_precision': 'year'}
+        month_event = {'date': '2020-03', 'date_precision': 'month'}
+        # year-only → (2020, 0, 0); month-only → (2020, 3, 0)
+        self.assertLess(_event_sort_key(year_event), _event_sort_key(month_event))
+
+    def test_missing_date_returns_zeros(self):
+        key = _event_sort_key({'date': ''})
+        self.assertEqual(key, (0, 0, 0))
+
+    def test_events_sorted_chronologically(self):
+        events = [
+            {'date': '2022-12-20', 'season': 9},
+            {'date': '2022-03-05', 'season': 9},
+            {'date': '2022-07-02', 'season': 9},
+        ]
+        sorted_events = sorted(events, key=_event_sort_key)
+        dates = [e['date'] for e in sorted_events]
+        self.assertEqual(dates, ['2022-03-05', '2022-07-02', '2022-12-20'])
+
+
+# ---------------------------------------------------------------------------
+# Unit tests — filter_timeline_by_month
+# ---------------------------------------------------------------------------
+
+class TestFilterTimelineByMonth(unittest.TestCase):
+    EVENTS = [
+        {'id': 'a', 'date': '2022-03-05', 'date_precision': 'day',   'season': 9},
+        {'id': 'b', 'date': '2022-07-02', 'date_precision': 'day',   'season': 9},
+        {'id': 'c', 'date': '2022',       'date_precision': 'year',  'season': 9},
+        {'id': 'd', 'date': '2022-03-15', 'date_precision': 'day',   'season': 9},
+        {'id': 'e', 'date': '2023-12-20', 'date_precision': 'day',   'season': 9},
+    ]
+
+    def test_filter_march_returns_march_events(self):
+        result = filter_timeline_by_month(self.EVENTS, 3)
+        ids = [e['id'] for e in result]
+        self.assertIn('a', ids)
+        self.assertIn('d', ids)
+        self.assertNotIn('b', ids)
+        self.assertNotIn('e', ids)
+
+    def test_year_only_events_excluded_from_month_filter(self):
+        result = filter_timeline_by_month(self.EVENTS, 3)
+        ids = [e['id'] for e in result]
+        self.assertNotIn('c', ids)
+
+    def test_month_with_no_matches_returns_empty(self):
+        result = filter_timeline_by_month(self.EVENTS, 4)
+        self.assertEqual(result, [])
+
+    def test_empty_events_returns_empty(self):
+        self.assertEqual(filter_timeline_by_month([], 6), [])
+
+    def test_december_filter(self):
+        result = filter_timeline_by_month(self.EVENTS, 12)
+        ids = [e['id'] for e in result]
+        self.assertIn('e', ids)
+        self.assertEqual(len(result), 1)
+
+
+# ---------------------------------------------------------------------------
+# Integration tests — load_events_for_season chronological order
+# ---------------------------------------------------------------------------
+
+class TestLoadEventsChronological(unittest.TestCase):
+    def test_season_7_events_sorted(self):
+        events = load_events_for_season(7)
+        keys = [_event_sort_key(e) for e in events]
+        self.assertEqual(keys, sorted(keys),
+                         "Season 7 events are not in chronological order")
+
+    def test_season_9_events_sorted(self):
+        events = load_events_for_season(9)
+        keys = [_event_sort_key(e) for e in events]
+        self.assertEqual(keys, sorted(keys),
+                         "Season 9 events are not in chronological order")
+
+    def test_all_seasons_chronological(self):
+        for s in range(1, 12):
+            events = load_events_for_season(s)
+            keys = [_event_sort_key(e) for e in events]
+            self.assertEqual(keys, sorted(keys),
+                             f"Season {s} events are not in chronological order")
+
+
+# ---------------------------------------------------------------------------
+# Integration tests — format_timeline_text
+# ---------------------------------------------------------------------------
+
+class TestFormatTimelineText(unittest.TestCase):
+    def setUp(self):
+        self.events7 = load_events_for_season(7)
+        self.events9 = load_events_for_season(9)
+
+    def test_returns_string(self):
+        self.assertIsInstance(format_timeline_text(7, self.events7), str)
+
+    def test_header_contains_season(self):
+        out = format_timeline_text(7, self.events7)
+        self.assertIn('SEASON 7 TIMELINE', out)
+
+    def test_month_label_in_header(self):
+        out = format_timeline_text(9, self.events9, month=3)
+        self.assertIn('March', out)
+
+    def test_event_titles_present(self):
+        out = format_timeline_text(7, self.events7)
+        self.assertIn('Season 7', out)
+
+    def test_hermit_names_present(self):
+        out = format_timeline_text(7, self.events7)
+        # At least one event references "All" or a hermit name
+        self.assertTrue('All' in out or 'TangoTek' in out or 'Grian' in out)
+
+    def test_empty_events_shows_no_events_message(self):
+        out = format_timeline_text(9, [], month=4)
+        self.assertIn('No events found', out)
+
+    def test_approximate_date_prefixed_with_tilde(self):
+        approx_event = [{
+            'id': 't1', 'date': '2020-11', 'date_precision': 'approximate',
+            'season': 7, 'hermits': ['Grian'], 'title': 'Test Event',
+            'description': 'A test.', 'type': 'lore',
+        }]
+        out = format_timeline_text(7, approx_event)
+        self.assertIn('~2020-11', out)
+
+
+# ---------------------------------------------------------------------------
+# CLI tests — timeline-only and month flags
+# ---------------------------------------------------------------------------
+
+class TestCLITimeline(unittest.TestCase):
+    def _run(self, *args: str) -> tuple[int, str, str]:
+        result = subprocess.run(
+            [sys.executable, SCRIPT, *args],
+            capture_output=True, text=True,
+        )
+        return result.returncode, result.stdout, result.stderr
+
+    def test_timeline_only_exits_0(self):
+        rc, _, _ = self._run('--season', '7', '--timeline-only')
+        self.assertEqual(rc, 0)
+
+    def test_timeline_only_contains_timeline_header(self):
+        _, stdout, _ = self._run('--season', '7', '--timeline-only')
+        self.assertIn('SEASON 7 TIMELINE', stdout)
+
+    def test_timeline_only_json_valid(self):
+        rc, stdout, _ = self._run('--season', '9', '--timeline-only', '--json')
+        self.assertEqual(rc, 0)
+        data = json.loads(stdout)
+        self.assertEqual(data['season'], 9)
+        self.assertIn('events', data)
+        self.assertIn('event_count', data)
+
+    def test_timeline_only_json_events_sorted(self):
+        _, stdout, _ = self._run('--season', '9', '--timeline-only', '--json')
+        data = json.loads(stdout)
+        events = data['events']
+        keys = [_event_sort_key(e) for e in events]
+        self.assertEqual(keys, sorted(keys), "Events not sorted chronologically")
+
+    def test_month_implies_timeline_only(self):
+        # --month without --timeline-only should still work (--month implies it)
+        rc, stdout, _ = self._run('--season', '9', '--month', '3')
+        self.assertEqual(rc, 0)
+        self.assertIn('TIMELINE', stdout)
+        self.assertIn('March', stdout)
+
+    def test_month_filter_json(self):
+        rc, stdout, _ = self._run('--season', '7', '--month', '6', '--json')
+        self.assertEqual(rc, 0)
+        data = json.loads(stdout)
+        self.assertEqual(data['month'], 6)
+        for ev in data['events']:
+            # Every returned event must be in June
+            self.assertTrue(ev['date'].startswith('2') and '-06-' in ev['date']
+                            or ev['date'].endswith('-06'),
+                            f"Event {ev['date']} not in June")
+
+    def test_month_out_of_range_exits_2(self):
+        rc, _, stderr = self._run('--season', '9', '--month', '13')
+        self.assertEqual(rc, 2)
+        self.assertIn('invalid month', stderr)
+
+    def test_month_with_no_events_exits_0(self):
+        # April (month 4) has no events in S9 — should exit 0, not error
+        rc, stdout, _ = self._run('--season', '9', '--month', '4')
+        self.assertEqual(rc, 0)
+        self.assertIn('No events found', stdout)
+
+    def test_timeline_json_each_event_has_required_fields(self):
+        _, stdout, _ = self._run('--season', '7', '--timeline-only', '--json')
+        data = json.loads(stdout)
+        for ev in data['events']:
+            for field in ('id', 'date', 'season', 'hermits', 'title', 'description'):
+                self.assertIn(field, ev, f"Event missing field '{field}': {ev}")
+
+    def test_seasons_7_8_9_timeline_all_have_events(self):
+        for s in [7, 8, 9]:
+            rc, stdout, _ = self._run('--season', str(s), '--timeline-only', '--json')
+            self.assertEqual(rc, 0)
+            data = json.loads(stdout)
+            self.assertGreater(data['event_count'], 0, f"Season {s} has no events")
+
+
+# ---------------------------------------------------------------------------
 # KNOWN_SEASONS constant
 # ---------------------------------------------------------------------------
 
@@ -440,11 +661,16 @@ if __name__ == '__main__':
         ('_extract_bullet_list', unittest.TestLoader().loadTestsFromTestCase(TestExtractBulletList)),
         ('_extract_members_from_text', unittest.TestLoader().loadTestsFromTestCase(TestExtractMembersFromText)),
         ('_extract_first_paragraph', unittest.TestLoader().loadTestsFromTestCase(TestExtractFirstParagraph)),
+        ('_event_sort_key', unittest.TestLoader().loadTestsFromTestCase(TestEventSortKey)),
+        ('filter_timeline_by_month', unittest.TestLoader().loadTestsFromTestCase(TestFilterTimelineByMonth)),
         ('load_season_file', unittest.TestLoader().loadTestsFromTestCase(TestLoadSeasonFile)),
         ('load_events_for_season', unittest.TestLoader().loadTestsFromTestCase(TestLoadEventsForSeason)),
+        ('load_events_chronological', unittest.TestLoader().loadTestsFromTestCase(TestLoadEventsChronological)),
         ('build_recap', unittest.TestLoader().loadTestsFromTestCase(TestBuildRecap)),
         ('format_text', unittest.TestLoader().loadTestsFromTestCase(TestFormatText)),
+        ('format_timeline_text', unittest.TestLoader().loadTestsFromTestCase(TestFormatTimelineText)),
         ('CLI', unittest.TestLoader().loadTestsFromTestCase(TestCLI)),
+        ('CLI_timeline', unittest.TestLoader().loadTestsFromTestCase(TestCLITimeline)),
         ('constants', unittest.TestLoader().loadTestsFromTestCase(TestConstants)),
     ]
 

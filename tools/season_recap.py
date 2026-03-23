@@ -7,14 +7,23 @@ the season markdown file and the shared events timeline.
 
 Usage
 -----
-  python3 tools/season_recap.py --season 9          # formatted text
-  python3 tools/season_recap.py --season 7 --json   # machine-readable JSON
-  python3 tools/season_recap.py --list               # list available seasons
+  python3 tools/season_recap.py --season 9              # full text digest
+  python3 tools/season_recap.py --season 7 --json       # machine-readable JSON
+  python3 tools/season_recap.py --list                  # list available seasons
+  python3 tools/season_recap.py --season 9 --month 3   # S9 events in March
+  python3 tools/season_recap.py --season 7 --timeline-only          # events only
+  python3 tools/season_recap.py --season 9 --month 6 --timeline-only --json
 
 Output (text mode)
 ------------------
   Season header, dates, members, key themes, notable events, major builds,
   and timeline events sourced from knowledge/timelines/events.json.
+
+Output (--timeline-only mode)
+------------------------------
+  Chronologically sorted events for the season (optionally filtered by
+  --month N). Each entry shows: date, hermit(s), title, and description.
+  Suitable for answering "what was happening in Season 9 in Month 3?".
 
 Output (JSON mode)
 ------------------
@@ -185,10 +194,24 @@ def load_season_file(season: int) -> tuple[dict, dict[str, str]]:
     return frontmatter, sections
 
 
+def _event_sort_key(event: dict) -> tuple:
+    """
+    Return a (year, month, day) tuple suitable for chronological sorting.
+    Missing date parts are replaced with 0 so partial dates sort first
+    within their group.
+    """
+    raw: str = event.get("date", "")
+    parts = raw.split("-")
+    year  = int(parts[0]) if len(parts) >= 1 and parts[0].isdigit() else 0
+    month = int(parts[1]) if len(parts) >= 2 and parts[1].isdigit() else 0
+    day   = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 0
+    return (year, month, day)
+
+
 def load_events_for_season(season: int) -> list[dict]:
     """
     Load ``knowledge/timelines/events.json`` and return only events
-    whose ``season`` field equals *season*.
+    whose ``season`` field equals *season*, sorted chronologically.
     """
     if not EVENTS_FILE.exists():
         return []
@@ -197,7 +220,27 @@ def load_events_for_season(season: int) -> list[dict]:
             all_events: list[dict] = json.load(fh)
     except (json.JSONDecodeError, OSError):
         return []
-    return [e for e in all_events if e.get("season") == season]
+    season_events = [e for e in all_events if e.get("season") == season]
+    return sorted(season_events, key=_event_sort_key)
+
+
+def filter_timeline_by_month(events: list[dict], month: int) -> list[dict]:
+    """
+    Return only those *events* whose date falls in *month* (1–12).
+
+    Events with year-only precision (``date_precision == "year"`` or dates
+    without a month component) are excluded when filtering by month, since
+    their month is genuinely unknown.
+    """
+    filtered = []
+    for ev in events:
+        raw = ev.get("date", "")
+        parts = raw.split("-")
+        if len(parts) < 2 or not parts[1].isdigit():
+            continue  # year-only — cannot match a specific month
+        if int(parts[1]) == month:
+            filtered.append(ev)
+    return filtered
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +433,80 @@ def format_text(recap: dict) -> str:
     return "\n".join(lines)
 
 
+_MONTH_NAMES = [
+    "", "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
+
+
+def format_timeline_text(
+    season: int,
+    events: list[dict],
+    month: int | None = None,
+) -> str:
+    """
+    Return a human-readable chronological timeline for *season*.
+
+    Each event line shows: date, hermit(s), title.
+    A description block follows each entry.
+    *month*, if given, is used only in the header label.
+    """
+    lines: list[str] = []
+
+    month_label = f" — {_MONTH_NAMES[month]}" if month and 1 <= month <= 12 else ""
+    lines.append(_hr("═"))
+    lines.append(f"  HERMITCRAFT SEASON {season} TIMELINE{month_label}")
+    lines.append(_hr("═"))
+
+    if not events:
+        lines.append("")
+        lines.append("  No events found for this query.")
+        lines.append("")
+        lines.append(_hr("═"))
+        return "\n".join(lines)
+
+    for ev in events:
+        date_str = ev.get("date", "unknown date")
+        precision = ev.get("date_precision", "day")
+        title = ev.get("title", "")
+        hermits = ev.get("hermits", [])
+        description = ev.get("description", "")
+
+        # Date label with precision hint
+        if precision == "approximate":
+            date_label = f"~{date_str}"
+        elif precision in ("month", "year"):
+            date_label = date_str
+        else:
+            date_label = date_str
+
+        # Hermit list
+        hermit_str = ", ".join(hermits) if hermits else "unknown"
+
+        lines.append("")
+        lines.append(f"  {date_label}  [{hermit_str}]")
+        lines.append(f"  {title}")
+
+        # Word-wrap description at ~76 chars
+        if description:
+            words = description.split()
+            row = ""
+            for w in words:
+                if len(row) + len(w) + 1 > 74:
+                    lines.append("    " + row)
+                    row = w
+                else:
+                    row = (row + " " + w).strip()
+            if row:
+                lines.append("    " + row)
+
+        lines.append("  " + "·" * 56)
+
+    lines.append("")
+    lines.append(_hr("═"))
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -397,7 +514,11 @@ def format_text(recap: dict) -> str:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="season_recap",
-        description="Rich digest for a given Hermitcraft season.",
+        description=(
+            "Rich digest for a given Hermitcraft season. "
+            "Use --timeline-only for chronological event browsing, "
+            "optionally filtered by --month."
+        ),
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
@@ -412,10 +533,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="List available seasons and exit",
     )
     parser.add_argument(
+        "--month",
+        type=int,
+        metavar="M",
+        help="Filter timeline events to a specific month (1–12); "
+             "implies --timeline-only",
+    )
+    parser.add_argument(
+        "--timeline-only",
+        action="store_true",
+        dest="timeline_only",
+        help="Output only the chronological event timeline (no full recap)",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         dest="as_json",
-        help="Output a machine-readable JSON object instead of text",
+        help="Output machine-readable JSON instead of text",
     )
     return parser
 
@@ -423,6 +557,10 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    # --month implies --timeline-only
+    if args.month is not None:
+        args.timeline_only = True
 
     if args.list:
         available = [s for s in KNOWN_SEASONS if (SEASONS_DIR / f"season-{s}.md").exists()]
@@ -438,6 +576,31 @@ def main(argv: list[str] | None = None) -> int:
                          f"Valid range: {KNOWN_SEASONS[0]}–{KNOWN_SEASONS[-1]}\n")
         return 2
 
+    # Validate --month range
+    if args.month is not None and not (1 <= args.month <= 12):
+        sys.stderr.write(f"[season_recap] invalid month: {args.month}. "
+                         "Must be 1–12.\n")
+        return 2
+
+    if args.timeline_only:
+        # Timeline-only path: no need to load the season markdown
+        events = load_events_for_season(season)
+        if args.month is not None:
+            events = filter_timeline_by_month(events, args.month)
+
+        if args.as_json:
+            payload = {
+                "season": season,
+                "month": args.month,
+                "event_count": len(events),
+                "events": events,
+            }
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            print(format_timeline_text(season, events, month=args.month))
+        return 0
+
+    # Full recap path
     try:
         recap = build_recap(season)
     except FileNotFoundError as exc:
