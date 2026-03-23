@@ -21,10 +21,47 @@ environment, not the work.
 
 ---
 
-## Step 1 — Scan for Infrastructure Blockers First
+## Step 1 — Read `.task_result_meta.json` First (automatic tagging)
 
-Before scoring, read the task result and check for any of the following
-signals. If found, the task is `blocked` regardless of outcome:
+The agent's Stop hook (`tools/tag_task_result.py`, configured in
+`.claude/settings.json`) runs automatically at the end of every session
+and writes `.task_result_meta.json` to the repo root.  **Read this file
+before doing anything else.**
+
+```bash
+cat .task_result_meta.json
+```
+
+Example output when an infrastructure blocker was detected:
+
+```json
+{
+  "schema_version": 1,
+  "session_id": "abc123",
+  "tagged_at": "2026-03-23T10:00:00+00:00",
+  "infrastructure_blocked": true,
+  "blocker_signal": "github[_ ]token",
+  "agent_explicitly_flagged_blocker": true,
+  "infra_score_weight": 0.25,
+  "verifier_instruction": "Infrastructure blocker detected. Score only the agent-controlled portion..."
+}
+```
+
+**If `infrastructure_blocked` is `true`:** skip to Step 2b (adjusted scoring)
+and set `verification_status = blocked`.
+
+**If `infrastructure_blocked` is `false`** (or the file is absent):
+proceed to Step 2a (standard scoring).
+
+The file is gitignored and regenerated on every session — it always
+reflects the most recent task completion.
+
+---
+
+## Step 1b — Manual Scan (fallback if metadata file is absent)
+
+If `.task_result_meta.json` is not present (e.g. hook not yet deployed,
+session predates the hook), scan the task result text manually for:
 
 - Authentication / credentials: `gh CLI not authenticated`, `GITHUB_TOKEN not set`, `permission denied`
 - Missing tools: `command not found`, `gh: not found`
@@ -37,14 +74,6 @@ signals. If found, the task is `blocked` regardless of outcome:
 2. Score *only the agent's portion* of the work (see Step 2b).
 3. Set status = `blocked`.
 4. Do not penalise the score for the infrastructure step the agent could not complete.
-
-Use `tools/verifier_score_adjuster.py` to compute the adjusted score:
-
-```bash
-python tools/verifier_score_adjuster.py \
-  --score <raw_score> \
-  --result "...task result text..."
-```
 
 ---
 
@@ -131,7 +160,10 @@ Next action: approve and merge.
 ## Quick Reference
 
 ```bash
-# Adjust score for infra blocker (exits 0=verified, 1=rejected, 2=blocked)
+# Primary: read the auto-generated metadata file
+cat .task_result_meta.json
+
+# Fallback: manually adjust score for infra blocker
 python tools/verifier_score_adjuster.py --score 0.35 \
   --result "Committed all files. Push failed: GITHUB_TOKEN not set."
 
@@ -140,6 +172,7 @@ python tools/verifier_score_adjuster.py --score 0.35 --json \
   --result "..."
 
 # Also see:
+#   tools/tag_task_result.py       — Stop hook that writes .task_result_meta.json
 #   tools/rejection_classifier.py  — classify fixable vs infra-blocked
 #   prompts/rejection-routing.md   — routing decisions after rejection
 ```

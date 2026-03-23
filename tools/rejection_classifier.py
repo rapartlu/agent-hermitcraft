@@ -41,6 +41,8 @@ INFRA_PATTERNS = [
     r"cannot connect",
     r"connection refused",
     r"dns (lookup|resolution)",
+    r"terminal prompts disabled",   # git credential failure in headless env
+    r"could not read (username|password)",  # git auth failure
 ]
 
 # Score threshold below which we classify more aggressively
