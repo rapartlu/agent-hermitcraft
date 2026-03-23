@@ -7,17 +7,25 @@ verification status.
 
 ## Three-Status Model
 
-Every completed task receives one of three statuses — **not two**:
+Every completed task receives one of three logical statuses:
 
-| Status | Meaning | Next action |
-|---|---|---|
-| `verified` | Score ≥ 0.75, no infrastructure blocker | Accept; merge PR / close issue |
-| `rejected` | Score < 0.75, agent-caused shortfall | Dispatch revision guidance immediately |
-| `blocked`  | Infrastructure blocker detected | Escalate to orchestrator; do NOT re-dispatch agent |
+| Logical status | Meaning | DB value to store | Next action |
+|---|---|---|---|
+| `verified` | Score ≥ 0.75, no infrastructure blocker | `approved` | Accept; merge PR / close issue |
+| `rejected` | Score < 0.75, agent-caused shortfall | `rejected` | Dispatch revision guidance immediately |
+| `blocked`  | Infrastructure blocker detected | `rejected` + note | Escalate to orchestrator; do NOT re-dispatch agent |
 
-The `blocked` status is distinct from `rejected`. A blocked task may
-have been completed correctly by the agent — the failure is in the
-environment, not the work.
+> **Schema compatibility note:** The orchestrator's `verification_status`
+> column only accepts `null`, `pending`, `approved`, and `rejected`.
+> A `blocked` task must be stored as `rejected` **with a mandatory note**
+> in the verification notes field that begins with `[INFRA-BLOCKED]` so
+> the supervisor can distinguish it from a genuine agent failure.
+> Once the orchestrator schema is updated to add a native `blocked` value,
+> remove this mapping and store `blocked` directly.
+
+The `blocked` logical status is distinct from a normal `rejected`. A
+blocked task may have been completed correctly by the agent — the
+failure is in the environment, not the work.
 
 ---
 
@@ -117,15 +125,21 @@ The adjuster applies a 25% infra weight correction automatically:
 Notes must include:
 
 1. **Status**: `verified` / `rejected` / `blocked`
-2. **Score**: raw score (and adjusted score if blocked)
-3. **Evidence**: specific lines from the result that support the score
-4. **Blocker signal** (if blocked): exact matched pattern
-5. **Next action**: what the orchestrator should do
+2. **DB value**: `approved` (verified) or `rejected` (rejected or blocked)
+3. **Score**: raw score (and adjusted score if blocked)
+4. **Evidence**: specific lines from the result that support the score
+5. **Blocker signal** (if blocked): exact matched pattern
+6. **Next action**: what the orchestrator should do
+
+**For blocked tasks**: the notes field **must** begin with `[INFRA-BLOCKED]`
+so the supervisor can distinguish it from a genuine agent failure, since
+both are stored as `rejected` in the current schema.
 
 ### Example — blocked task
 
 ```
-Status: blocked
+[INFRA-BLOCKED] DB value: rejected (infrastructure failure, not agent error)
+Logical status: blocked
 Raw score: 0.35 → adjusted: 0.47
 Blocker: "GITHUB_TOKEN not set in container" (matched: 'github[_ ]token')
 Evidence: Agent committed all 11 season files (46ea6ad, 7dda94c).

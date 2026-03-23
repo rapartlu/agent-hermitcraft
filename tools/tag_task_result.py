@@ -150,9 +150,11 @@ def main():
         out_path = Path(cwd) / METADATA_FILENAME
         out_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
-    except Exception:
-        # Hooks must not crash Claude — swallow all errors silently.
-        pass
+    except Exception as exc:
+        # Hooks must not crash Claude — exit 0 regardless.
+        # Write to stderr so the error is visible in hook debug logs
+        # without blocking the stop event.
+        sys.stderr.write(f"[tag_task_result] error: {exc}\n")
 
     sys.exit(0)  # Always exit 0
 

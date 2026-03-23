@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 tools/tag_task_result.py"
+          }
+        ]
+      }
+    ]
+  }
+}
