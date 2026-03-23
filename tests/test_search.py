@@ -17,13 +17,17 @@ from tools.search import (
     SEASONS_DIR,
     VIDEO_EVENTS_FILE,
     _count_matches,
+    _make_link,
     _tokenise_query,
+    format_grouped_results,
     format_search_results,
+    group_results,
     make_snippet,
     run_search,
     score_result,
     search_events,
     search_hermit_profiles,
+    search_highlights,
     search_season_files,
 )
 
@@ -450,7 +454,7 @@ class TestCLI(unittest.TestCase):
 
 class TestDataIntegrity(unittest.TestCase):
     def test_all_sources_constant(self):
-        self.assertEqual(set(ALL_SOURCES), {"events", "hermits", "seasons"})
+        self.assertEqual(set(ALL_SOURCES), {"events", "hermits", "seasons", "highlights"})
 
     def test_events_file_exists(self):
         self.assertTrue(EVENTS_FILE.exists())
@@ -476,6 +480,299 @@ class TestDataIntegrity(unittest.TestCase):
         results = search_season_files(["season"])
         self.assertGreater(len(results), 0)
 
+    def test_highlights_are_searchable(self):
+        results = search_highlights(["launch"])
+        self.assertGreater(len(results), 0)
+
+
+# ---------------------------------------------------------------------------
+# _make_link
+# ---------------------------------------------------------------------------
+
+class TestMakeLink(unittest.TestCase):
+
+    def _r(self, source, season=None, hermits=None, id_="test-id"):
+        return {
+            "source": source, "season": season,
+            "hermits": hermits or [], "id": id_,
+        }
+
+    def test_hermit_profile_link(self):
+        r = self._r("hermit_profile", hermits=["Grian"])
+        link = _make_link("hermit_profile", r)
+        self.assertIn("hermit_profile", link)
+        self.assertIn("Grian", link)
+
+    def test_season_file_link(self):
+        r = self._r("season_file", season=7)
+        link = _make_link("season_file", r)
+        self.assertIn("season_recap", link)
+        self.assertIn("7", link)
+
+    def test_highlight_link(self):
+        r = self._r("highlight", season=9)
+        link = _make_link("highlight", r)
+        self.assertIn("season_highlights", link)
+        self.assertIn("9", link)
+
+    def test_event_with_season_link(self):
+        r = self._r("event", season=6)
+        link = _make_link("event", r)
+        self.assertIn("timeline", link)
+        self.assertIn("6", link)
+
+    def test_event_without_season_link(self):
+        r = self._r("event", season=None)
+        link = _make_link("event", r)
+        self.assertIn("timeline", link)
+
+    def test_unknown_source_returns_empty(self):
+        r = self._r("unknown_source")
+        self.assertEqual(_make_link("unknown_source", r), "")
+
+
+# ---------------------------------------------------------------------------
+# search_highlights
+# ---------------------------------------------------------------------------
+
+class TestSearchHighlights(unittest.TestCase):
+
+    def test_returns_list(self):
+        results = search_highlights(["season"])
+        self.assertIsInstance(results, list)
+
+    def test_source_field_is_highlight(self):
+        results = search_highlights(["launch"])
+        for r in results:
+            self.assertEqual(r["source"], "highlight")
+
+    def test_all_scores_positive(self):
+        results = search_highlights(["redstone"])
+        for r in results:
+            self.assertGreater(r["score"], 0)
+
+    def test_season_filter_applied(self):
+        results = search_highlights(["season"], season_filter=7)
+        for r in results:
+            self.assertEqual(r["season"], 7)
+
+    def test_each_result_has_required_fields(self):
+        results = search_highlights(["mumbo"])
+        for r in results:
+            for field in ("source", "score", "season", "hermits",
+                          "id", "title", "snippet", "date", "type"):
+                self.assertIn(field, r, f"Missing field {field!r}")
+
+    def test_no_match_returns_empty(self):
+        results = search_highlights(["xyznotaword99999"])
+        self.assertEqual(results, [])
+
+    def test_id_contains_season(self):
+        results = search_highlights(["launch"], season_filter=7)
+        for r in results:
+            self.assertIn("s7", r["id"])
+
+
+# ---------------------------------------------------------------------------
+# run_search — rank and link fields
+# ---------------------------------------------------------------------------
+
+class TestRunSearchRankLink(unittest.TestCase):
+
+    def test_every_result_has_rank(self):
+        results = run_search("grian", limit=5)
+        for r in results:
+            self.assertIn("rank", r)
+
+    def test_ranks_are_sequential_from_1(self):
+        results = run_search("grian", limit=5)
+        ranks = [r["rank"] for r in results]
+        self.assertEqual(ranks, list(range(1, len(results) + 1)))
+
+    def test_every_result_has_link(self):
+        results = run_search("mumbo", limit=10)
+        for r in results:
+            self.assertIn("link", r)
+            self.assertIsInstance(r["link"], str)
+
+    def test_hermit_result_link_contains_hermit_profile(self):
+        results = run_search("mumbo", sources=["hermits"], limit=5)
+        self.assertTrue(len(results) > 0)
+        self.assertIn("hermit_profile", results[0]["link"])
+
+    def test_season_result_link_contains_season_recap(self):
+        results = run_search("mycelium", sources=["seasons"], limit=5)
+        self.assertTrue(len(results) > 0)
+        for r in results:
+            self.assertIn("season_recap", r["link"])
+
+    def test_highlights_source_included_by_default(self):
+        results = run_search("decked out", limit=20)
+        sources = {r["source"] for r in results}
+        # With default sources, highlights should be reachable
+        self.assertIn("highlights", ALL_SOURCES)
+
+    def test_highlights_source_filter_works(self):
+        results = run_search("season", sources=["highlights"], limit=10)
+        for r in results:
+            self.assertEqual(r["source"], "highlight")
+
+    def test_rank_1_has_highest_score(self):
+        results = run_search("mumbo", limit=10)
+        if len(results) > 1:
+            self.assertGreaterEqual(results[0]["score"], results[1]["score"])
+
+
+# ---------------------------------------------------------------------------
+# group_results
+# ---------------------------------------------------------------------------
+
+class TestGroupResults(unittest.TestCase):
+
+    def _make_result(self, source, rank=1):
+        return {
+            "source": source, "score": 5, "season": 7, "hermits": [],
+            "id": f"{source}-1", "title": "T", "snippet": "", "date": "",
+            "type": "test", "link": "", "rank": rank,
+        }
+
+    def test_returns_dict_with_four_keys(self):
+        grouped = group_results([])
+        self.assertEqual(set(grouped.keys()), {"hermits", "seasons", "events", "highlights"})
+
+    def test_hermit_profile_goes_to_hermits(self):
+        r = self._make_result("hermit_profile")
+        grouped = group_results([r])
+        self.assertIn(r, grouped["hermits"])
+
+    def test_season_file_goes_to_seasons(self):
+        r = self._make_result("season_file")
+        grouped = group_results([r])
+        self.assertIn(r, grouped["seasons"])
+
+    def test_event_goes_to_events(self):
+        r = self._make_result("event")
+        grouped = group_results([r])
+        self.assertIn(r, grouped["events"])
+
+    def test_highlight_goes_to_highlights(self):
+        r = self._make_result("highlight")
+        grouped = group_results([r])
+        self.assertIn(r, grouped["highlights"])
+
+    def test_empty_results_gives_empty_groups(self):
+        grouped = group_results([])
+        for v in grouped.values():
+            self.assertEqual(v, [])
+
+    def test_order_preserved_within_group(self):
+        r1 = self._make_result("event", rank=1)
+        r2 = self._make_result("event", rank=2)
+        grouped = group_results([r1, r2])
+        self.assertEqual(grouped["events"], [r1, r2])
+
+
+# ---------------------------------------------------------------------------
+# format_grouped_results
+# ---------------------------------------------------------------------------
+
+class TestFormatGroupedResults(unittest.TestCase):
+
+    def test_returns_string(self):
+        results = run_search("grian", limit=5)
+        self.assertIsInstance(format_grouped_results("grian", results), str)
+
+    def test_grouped_header_present(self):
+        text = format_grouped_results("test", [])
+        self.assertIn("grouped", text)
+
+    def test_hermit_section_heading(self):
+        results = run_search("grian", sources=["hermits"], limit=3)
+        text = format_grouped_results("grian", results)
+        self.assertIn("HERMIT", text)
+
+    def test_season_section_heading(self):
+        results = run_search("mycelium", sources=["seasons"], limit=3)
+        text = format_grouped_results("mycelium", results)
+        self.assertIn("SEASON", text)
+
+    def test_no_results_message(self):
+        text = format_grouped_results("xyznotaword", [])
+        self.assertIn("No matches found", text)
+
+    def test_link_shown_in_grouped_output(self):
+        results = run_search("grian", sources=["hermits"], limit=1)
+        text = format_grouped_results("grian", results)
+        self.assertIn("Link:", text)
+
+    def test_rank_shown_in_grouped_output(self):
+        results = run_search("grian", sources=["hermits"], limit=1)
+        text = format_grouped_results("grian", results)
+        self.assertIn("#1", text)
+
+
+# ---------------------------------------------------------------------------
+# CLI — --grouped flag and updated JSON
+# ---------------------------------------------------------------------------
+
+class TestCLIEnhancements(unittest.TestCase):
+
+    def _run(self, *args):
+        result = subprocess.run(
+            [sys.executable, SCRIPT, *args],
+            capture_output=True, text=True,
+        )
+        return result.returncode, result.stdout, result.stderr
+
+    def test_grouped_flag_exits_0(self):
+        rc, _, _ = self._run("--query", "grian", "--grouped")
+        self.assertEqual(rc, 0)
+
+    def test_grouped_output_contains_hermit_heading(self):
+        _, out, _ = self._run("--query", "grian", "--grouped")
+        self.assertIn("HERMIT", out)
+
+    def test_json_output_has_grouped_key(self):
+        _, out, _ = self._run("--query", "mumbo", "--json")
+        data = json.loads(out)
+        self.assertIn("grouped", data)
+
+    def test_json_grouped_has_four_keys(self):
+        _, out, _ = self._run("--query", "mumbo", "--json")
+        data = json.loads(out)
+        self.assertEqual(
+            set(data["grouped"].keys()),
+            {"hermits", "seasons", "events", "highlights"},
+        )
+
+    def test_json_results_have_rank_field(self):
+        _, out, _ = self._run("--query", "grian", "--json")
+        data = json.loads(out)
+        for r in data["results"]:
+            self.assertIn("rank", r)
+
+    def test_json_results_have_link_field(self):
+        _, out, _ = self._run("--query", "grian", "--json")
+        data = json.loads(out)
+        for r in data["results"]:
+            self.assertIn("link", r)
+            self.assertIsInstance(r["link"], str)
+
+    def test_sources_highlights_only(self):
+        rc, out, _ = self._run("--query", "season", "--sources", "highlights", "--json")
+        self.assertEqual(rc, 0)
+        data = json.loads(out)
+        for r in data["results"]:
+            self.assertEqual(r["source"], "highlight")
+
+    def test_text_output_shows_link(self):
+        _, out, _ = self._run("--query", "grian", "--sources", "hermits")
+        self.assertIn("Link:", out)
+
+    def test_text_output_shows_rank(self):
+        _, out, _ = self._run("--query", "grian", "--sources", "hermits")
+        self.assertIn("#1", out)
+
 
 if __name__ == "__main__":
     import traceback
@@ -492,6 +789,12 @@ if __name__ == "__main__":
         ("format_results",    unittest.TestLoader().loadTestsFromTestCase(TestFormatSearchResults)),
         ("CLI",               unittest.TestLoader().loadTestsFromTestCase(TestCLI)),
         ("data_integrity",    unittest.TestLoader().loadTestsFromTestCase(TestDataIntegrity)),
+        ("make_link",         unittest.TestLoader().loadTestsFromTestCase(TestMakeLink)),
+        ("search_highlights", unittest.TestLoader().loadTestsFromTestCase(TestSearchHighlights)),
+        ("rank_link",         unittest.TestLoader().loadTestsFromTestCase(TestRunSearchRankLink)),
+        ("group_results",     unittest.TestLoader().loadTestsFromTestCase(TestGroupResults)),
+        ("format_grouped",    unittest.TestLoader().loadTestsFromTestCase(TestFormatGroupedResults)),
+        ("cli_enhancements",  unittest.TestLoader().loadTestsFromTestCase(TestCLIEnhancements)),
     ]
 
     passed = failed = 0

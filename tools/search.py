@@ -2,9 +2,10 @@
 """
 Hermitcraft Knowledge Search
 =============================
-Search across Hermitcraft season events, hermit profiles, and season
-files for one or more keywords. Results are ranked by relevance and
-include season number and hermit attribution.
+Search across Hermitcraft season events, hermit profiles, season
+files, and season highlights for one or more keywords. Results are
+ranked by relevance and include season number, hermit attribution,
+a numeric rank, and a canonical link to the relevant CLI tool.
 
 Usage
 -----
@@ -13,24 +14,30 @@ Usage
   python3 tools/search.py --query "Decked Out" --season 7
   python3 tools/search.py --query "redstone" --sources events hermits
   python3 tools/search.py --query "mycelium" --limit 5
+  python3 tools/search.py --query "mumbo" --grouped
 
 Sources searched (default: all)
 ---------------------------------
-  events    — knowledge/timelines/events.json
-              + knowledge/timelines/video_events.json
-  hermits   — knowledge/hermits/*.md  (profiles)
-  seasons   — knowledge/seasons/*.md  (season summaries)
+  events      — knowledge/timelines/events.json
+                + knowledge/timelines/video_events.json
+  hermits     — knowledge/hermits/*.md  (profiles)
+  seasons     — knowledge/seasons/*.md  (season summaries)
+  highlights  — top-ranked events per season (via season_highlights)
 
 Ranking
 -------
   Title / heading matches score 3×; description / body matches score 1×.
   Query is split on whitespace; each word is searched independently (OR
   logic). Results with more keyword matches rank higher.
+  Each result carries a ``rank`` field (1-based position in the sorted
+  list) and a ``link`` field with the canonical CLI invocation.
 
 Output
 ------
   Default: human-readable text digest.
-  --json : machine-readable JSON object with a "results" array.
+  --json    : machine-readable JSON with a "results" array and a
+              "grouped" object keyed by source type.
+  --grouped : human-readable output grouped by source type.
 
 Exit codes
 ----------
@@ -55,7 +62,7 @@ VIDEO_EVENTS_FILE = ROOT / "knowledge" / "timelines" / "video_events.json"
 HERMITS_DIR = ROOT / "knowledge" / "hermits"
 SEASONS_DIR = ROOT / "knowledge" / "seasons"
 
-ALL_SOURCES = ("events", "hermits", "seasons")
+ALL_SOURCES = ("events", "hermits", "seasons", "highlights")
 
 # ---------------------------------------------------------------------------
 # Scoring helpers
@@ -167,7 +174,7 @@ def search_events(tokens: list[str], season_filter: int | None = None) -> list[d
         sc = score_result(tokens, title, body)
         if sc <= 0:
             continue
-        results.append({
+        r: dict = {
             "source": "event",
             "score": sc,
             "season": season,
@@ -177,7 +184,9 @@ def search_events(tokens: list[str], season_filter: int | None = None) -> list[d
             "snippet": make_snippet(body, tokens) if body else "",
             "date": ev.get("date", ""),
             "type": ev.get("type", ""),
-        })
+        }
+        r["link"] = _make_link("event", r)
+        results.append(r)
     return results
 
 
@@ -218,7 +227,7 @@ def search_hermit_profiles(
         if sc <= 0:
             continue
 
-        results.append({
+        r = {
             "source": "hermit_profile",
             "score": sc,
             "season": None,
@@ -228,7 +237,9 @@ def search_hermit_profiles(
             "snippet": make_snippet(body, tokens),
             "date": fm.get("join_date", fm.get("joined_year", "")),
             "type": "profile",
-        })
+        }
+        r["link"] = _make_link("hermit_profile", r)
+        results.append(r)
     return results
 
 
@@ -262,7 +273,7 @@ def search_season_files(
         if sc <= 0:
             continue
 
-        results.append({
+        r = {
             "source": "season_file",
             "score": sc,
             "season": season_num if season_num else None,
@@ -272,8 +283,124 @@ def search_season_files(
             "snippet": make_snippet(body, tokens),
             "date": fm.get("start_date", ""),
             "type": "season_summary",
-        })
+        }
+        r["link"] = _make_link("season_file", r)
+        results.append(r)
     return results
+
+
+# ---------------------------------------------------------------------------
+# Canonical link builder
+# ---------------------------------------------------------------------------
+
+def _make_link(source: str, result: dict) -> str:
+    """Return a canonical CLI invocation string for *result*.
+
+    These strings let callers drill into the full detail view for any
+    search hit — e.g. pass them directly to the relevant tool.
+    """
+    season = result.get("season")
+    if source == "hermit_profile":
+        name = result["hermits"][0] if result.get("hermits") else result["id"]
+        return f"python -m tools.hermit_profile --hermit {name!r}"
+    if source == "season_file":
+        return f"python -m tools.season_recap --season {season}"
+    if source == "highlight":
+        return f"python -m tools.season_highlights --season {season}"
+    if source == "event":
+        if season:
+            return f"python -m tools.timeline --season {season}"
+        return "python -m tools.timeline"
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# Highlights search
+# ---------------------------------------------------------------------------
+
+def search_highlights(
+    tokens: list[str],
+    season_filter: int | None = None,
+) -> list[dict]:
+    """
+    Search curated season highlights for *tokens*.
+
+    Highlights are the top-ranked events per season produced by
+    ``tools.season_highlights``.  Each matching highlight becomes one
+    result dict with ``source == "highlight"``.
+    """
+    # Import lazily so the module stays usable without season_highlights.
+    # Support both `python3 -m tools.search` and `python3 tools/search.py`
+    # invocations by ensuring the repo root is on sys.path first.
+    try:
+        import importlib
+        _root = str(Path(__file__).parent.parent)
+        if _root not in sys.path:
+            sys.path.insert(0, _root)
+        _mod = importlib.import_module("tools.season_highlights")
+        rank_season_highlights = _mod.rank_season_highlights
+    except Exception:
+        return []
+
+    # Determine which seasons to search
+    seasons_to_search: list[int] = (
+        [season_filter] if season_filter is not None
+        else list(range(1, 12))
+    )
+
+    results = []
+    for season_num in seasons_to_search:
+        try:
+            highlights = rank_season_highlights(season_num, top_n=20)
+        except Exception:
+            continue
+        for entry in highlights:
+            title = entry.get("title", "")
+            body = entry.get("description", "")
+            sc = score_result(tokens, title, body)
+            if sc <= 0:
+                continue
+            results.append({
+                "source": "highlight",
+                "score": sc,
+                "season": season_num,
+                "hermits": entry.get("hermits", []),
+                "id": f"highlight-s{season_num}-{entry.get('rank', 0)}",
+                "title": title,
+                "snippet": make_snippet(body, tokens) if body else "",
+                "date": entry.get("date", ""),
+                "type": entry.get("type", "highlight"),
+                "significance_score": entry.get("significance_score", 0),
+            })
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Result grouping
+# ---------------------------------------------------------------------------
+
+# Maps internal source keys to friendly group names used in grouped output.
+_GROUP_LABELS: dict[str, str] = {
+    "hermit_profile": "hermits",
+    "season_file":    "seasons",
+    "event":          "events",
+    "highlight":      "highlights",
+}
+
+
+def group_results(results: list[dict]) -> dict[str, list[dict]]:
+    """Return *results* organised into a dict keyed by source-group label.
+
+    Keys: ``hermits``, ``seasons``, ``events``, ``highlights``.
+    Within each group items retain their overall rank order.
+    """
+    grouped: dict[str, list[dict]] = {
+        "hermits": [], "seasons": [], "events": [], "highlights": [],
+    }
+    for r in results:
+        label = _GROUP_LABELS.get(r["source"], r["source"])
+        grouped.setdefault(label, []).append(r)
+    return grouped
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +417,10 @@ def run_search(
     Search *query* across the requested *sources*.
 
     Returns a list of result dicts sorted by score (highest first),
-    capped at *limit* entries.
+    capped at *limit* entries.  Every result carries:
+
+    * ``rank``  — 1-based position in the sorted result list.
+    * ``link``  — canonical CLI invocation for the matching item.
     """
     if sources is None:
         sources = list(ALL_SOURCES)
@@ -307,6 +437,8 @@ def run_search(
         all_results.extend(search_hermit_profiles(tokens, season_filter))
     if "seasons" in sources:
         all_results.extend(search_season_files(tokens, season_filter))
+    if "highlights" in sources:
+        all_results.extend(search_highlights(tokens, season_filter))
 
     # Sort: score desc, then season asc (None seasons last), then id
     def sort_key(r: dict) -> tuple:
@@ -314,7 +446,15 @@ def run_search(
         return (-r["score"], season_sort, r["id"])
 
     all_results.sort(key=sort_key)
-    return all_results[:limit]
+    ranked = all_results[:limit]
+
+    # Stamp rank (1-based) on each result; ensure link is present.
+    for i, r in enumerate(ranked, start=1):
+        r["rank"] = i
+        if "link" not in r:
+            r["link"] = _make_link(r["source"], r)
+
+    return ranked
 
 
 # ---------------------------------------------------------------------------
@@ -325,8 +465,51 @@ def _hr(char: str = "─", width: int = 60) -> str:
     return char * width
 
 
+def _format_result_block(r: dict) -> list[str]:
+    """Return lines for a single result card (used by both formatters)."""
+    lines: list[str] = []
+    score  = r["score"]
+    source = r["source"]
+    season = r["season"]
+    rank   = r.get("rank", "?")
+    hermits: list = r["hermits"]
+    title  = r["title"]
+    snippet = r["snippet"]
+    date   = r["date"]
+    link   = r.get("link", "")
+
+    season_label = f"Season {season}" if season else "cross-season"
+    hermit_str   = ", ".join(hermits) if hermits else "—"
+    date_label   = f"  ·  {date}" if date else ""
+
+    lines.append("")
+    lines.append(
+        f"  #{rank}  [Score: {score}]  {source}  ·  {season_label}{date_label}"
+    )
+    lines.append(f"  {title}")
+    if hermits:
+        lines.append(f"  Hermits: {hermit_str}")
+    if link:
+        lines.append(f"  Link: {link}")
+    lines.append("  " + _hr("─", 56))
+    if snippet:
+        # Word-wrap snippet at ~76 chars
+        words = snippet.split()
+        row = ""
+        for w in words:
+            if len(row) + len(w) + 1 > 74:
+                lines.append("  " + row)
+                row = w
+            else:
+                row = (row + " " + w).strip()
+        if row:
+            lines.append("  " + row)
+    lines.append("  " + _hr("─", 56))
+    return lines
+
+
 def format_search_results(query: str, results: list[dict]) -> str:
-    """Return a human-readable search results string."""
+    """Return a human-readable flat search results string."""
     lines: list[str] = []
     lines.append(_hr("═"))
     lines.append(f'  HERMITCRAFT SEARCH: "{query}"')
@@ -342,37 +525,48 @@ def format_search_results(query: str, results: list[dict]) -> str:
         return "\n".join(lines)
 
     for r in results:
-        score = r["score"]
-        source = r["source"]
-        season = r["season"]
-        hermits: list = r["hermits"]
-        title = r["title"]
-        snippet = r["snippet"]
-        date = r["date"]
+        lines.extend(_format_result_block(r))
 
-        season_label = f"Season {season}" if season else "cross-season"
-        hermit_str = ", ".join(hermits) if hermits else "—"
-        date_label = f"  ·  {date}" if date else ""
+    lines.append("")
+    lines.append(_hr("═"))
+    return "\n".join(lines)
 
+
+_GROUP_HEADING: dict[str, str] = {
+    "hermits":    "👤 HERMIT PROFILES",
+    "seasons":    "📅 SEASONS",
+    "events":     "📋 EVENTS",
+    "highlights": "🏅 HIGHLIGHTS",
+}
+
+
+def format_grouped_results(query: str, results: list[dict]) -> str:
+    """Return a human-readable search results string grouped by source type."""
+    lines: list[str] = []
+    lines.append(_hr("═"))
+    lines.append(f'  HERMITCRAFT SEARCH: "{query}"  (grouped)')
+    count = len(results)
+    lines.append(f"  {count} result{'s' if count != 1 else ''} found")
+    lines.append(_hr("═"))
+
+    if not results:
         lines.append("")
-        lines.append(f"  [Score: {score}]  {source}  ·  {season_label}{date_label}")
-        lines.append(f"  {title}")
-        if hermits:
-            lines.append(f"  Hermits: {hermit_str}")
-        lines.append("  " + _hr("─", 56))
-        if snippet:
-            # Word-wrap snippet at ~76 chars
-            words = snippet.split()
-            row = ""
-            for w in words:
-                if len(row) + len(w) + 1 > 74:
-                    lines.append("  " + row)
-                    row = w
-                else:
-                    row = (row + " " + w).strip()
-            if row:
-                lines.append("  " + row)
-        lines.append("  " + _hr("─", 56))
+        lines.append("  No matches found. Try different keywords or --sources all.")
+        lines.append("")
+        lines.append(_hr("═"))
+        return "\n".join(lines)
+
+    grouped = group_results(results)
+    for group_key in ("hermits", "seasons", "highlights", "events"):
+        group = grouped.get(group_key, [])
+        if not group:
+            continue
+        heading = _GROUP_HEADING.get(group_key, group_key.upper())
+        lines.append("")
+        lines.append(f"  {heading}  ({len(group)})")
+        lines.append("  " + _hr("═", 56))
+        for r in group:
+            lines.extend(_format_result_block(r))
 
     lines.append("")
     lines.append(_hr("═"))
@@ -387,8 +581,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="search",
         description=(
-            "Search across Hermitcraft events, hermit profiles, and season "
-            "files for one or more keywords."
+            "Search across Hermitcraft events, hermit profiles, season "
+            "files, and highlights for one or more keywords."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
@@ -429,6 +623,12 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="as_json",
         help="Output machine-readable JSON instead of text.",
     )
+    parser.add_argument(
+        "--grouped",
+        action="store_true",
+        dest="grouped",
+        help="Group results by source type (hermits, seasons, highlights, events).",
+    )
     return parser
 
 
@@ -454,8 +654,11 @@ def main(argv: list[str] | None = None) -> int:
             "season_filter": args.season,
             "result_count": len(results),
             "results": results,
+            "grouped": group_results(results),
         }
         print(json.dumps(payload, indent=2, ensure_ascii=False))
+    elif args.grouped:
+        print(format_grouped_results(args.query, results))
     else:
         print(format_search_results(args.query, results))
 
