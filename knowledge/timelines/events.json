@@ -4,10 +4,10 @@
     "date": "2012-04-13",
     "date_precision": "day",
     "season": 1,
-    "hermits": ["Generikb", "Xisumavoid", "Hypnotizd", "Keralis", "BdoubleO100"],
+    "hermits": ["Generikb", "Xisumavoid", "Hypnotizd", "Keralis", "Biffa2001", "777static777", "Kiershar", "Red3yz", "Sokar", "Topmass"],
     "type": "milestone",
     "title": "Hermitcraft Server Founded",
-    "description": "Generikb launches Hermitcraft on Minecraft 1.2.5 with 10 founding members, marking the start of what would become one of the longest-running Minecraft SMPs.",
+    "description": "Generikb launches Hermitcraft on Minecraft 1.2.5 with ten founding members — 777static777, Biffa2001, Generikb, Hypnotizd, Keralis, Kiershar, Red3yz, Sokar, Topmass, and Xisumavoid — marking the start of what would become one of the longest-running Minecraft SMPs.",
     "source": "knowledge/seasons/season-1.md"
   },
   {
@@ -15,10 +15,10 @@
     "date": "2012-04-13",
     "date_precision": "day",
     "season": 1,
-    "hermits": ["Generikb", "Xisumavoid", "Hypnotizd", "Keralis", "Biffa2001"],
+    "hermits": ["Generikb"],
     "type": "milestone",
-    "title": "Founding 10 Members Begin Playing",
-    "description": "The original ten Hermits — 777static777, Biffa2001, Generikb, Hypnotizd, Keralis, Kiershar, Red3yz, Sokar, Topmass, and Xisumavoid — start the server together.",
+    "title": "First Hermitcraft Episodes Published to YouTube",
+    "description": "Generikb and several founding members publish the first Hermitcraft Let's Play episodes on YouTube on launch day, establishing the series' tradition of content-creator-driven survival gameplay.",
     "source": "knowledge/seasons/season-1.md"
   },
   {
@@ -332,12 +332,12 @@
   {
     "id": "s11-001",
     "date": "2025-11-08",
-    "date_precision": "day",
+    "date_precision": "approximate",
     "season": 11,
     "hermits": ["All"],
     "type": "milestone",
     "title": "Season 11 Launch",
-    "description": "Hermitcraft Season 11 launches on Minecraft 1.21.11 with 25 returning members, two Hermits from Season 10 choosing not to return.",
+    "description": "Hermitcraft Season 11 launches on Minecraft 1.21.x with 25 returning members, two Hermits from Season 10 choosing not to return.",
     "source": "knowledge/seasons/season-11.md"
   },
   {
@@ -371,6 +371,17 @@
     "type": "collab",
     "title": "ZITS and Poe-Poe Groups Continue into Season 11",
     "description": "The ZITS group (Zedaph, ImpulseSV, TangoTek, Skizzleman) and Poe-Poe group (GoodTimesWithScar, Grian, Cubfan135, Skizzleman) from Season 10 carry their collaborations into Season 11.",
+    "source": "knowledge/seasons/season-11.md"
+  },
+  {
+    "id": "s11-005",
+    "date": "2025-12",
+    "date_precision": "month",
+    "season": 11,
+    "hermits": ["PearlescentMoon", "Grian", "SmallishBeans"],
+    "type": "milestone",
+    "title": "New Hermits Join Season 11",
+    "description": "Season 11 welcomes new and returning faces including PearlescentMoon, with several guest appearances expanding the cast beyond the core Season 10 roster.",
     "source": "knowledge/seasons/season-11.md"
   },
   {
