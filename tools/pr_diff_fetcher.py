@@ -34,6 +34,8 @@ import sys
 from dataclasses import dataclass, asdict
 from typing import Optional
 
+from tools.api_retry import run_with_retry
+
 # Threshold above which we switch to per-file mode (100 KB)
 DIFF_TRUNCATION_THRESHOLD = 100_000
 
@@ -63,9 +65,14 @@ class DiffReport:
 
 
 def run(cmd: list, timeout: int = 60) -> tuple[int, str, str]:
-    """Run a subprocess, return (returncode, stdout, stderr)."""
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    return result.returncode, result.stdout, result.stderr
+    """Run a subprocess with automatic rate-limit retry.
+
+    Delegates to ``api_retry.run_with_retry`` so that GitHub API calls
+    throttled with HTTP 429 / rate-limit responses are retried with
+    exponential backoff (up to 5 times, 1 s → 2 s → 4 s → 8 s → 16 s)
+    before surfacing a failure.
+    """
+    return run_with_retry(cmd, timeout=timeout)
 
 
 def fetch_unified_diff(repo: str, pr: int) -> tuple[Optional[str], Optional[str]]:
