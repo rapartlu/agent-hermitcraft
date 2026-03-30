@@ -14,11 +14,17 @@ Usage:
     python -m tools.collab_query --hermit-a EthosLab --hermit-b BdoubleO100 --json
     python -m tools.collab_query --hermit-a Grian --hermit-b Scar --types lore build
 
-    # Top-collaborators leaderboard mode:
+    # Top-collaborators leaderboard mode (one hermit vs all others):
     python -m tools.collab_query --hermit-a Grian --top-collabs
     python -m tools.collab_query --hermit-a TangoTek --top-collabs --top 5
     python -m tools.collab_query --hermit-a Iskall85 --top-collabs --season 8
     python -m tools.collab_query --hermit-a Grian --top-collabs --json
+
+    # Global leaderboard mode (all hermits ranked by social connectivity):
+    python -m tools.collab_query --global-leaderboard
+    python -m tools.collab_query --global-leaderboard --season 8
+    python -m tools.collab_query --global-leaderboard --top 10
+    python -m tools.collab_query --global-leaderboard --json
 """
 
 from __future__ import annotations
@@ -335,6 +341,120 @@ def format_text(output: dict) -> str:
     return "\n".join(lines)
 
 
+def build_global_leaderboard(
+    season_filter: int | None = None,
+    type_filter: list[str] | None = None,
+    top_n: int = 20,
+) -> list[dict]:
+    """
+    Rank every hermit by their total shared-event count across all other hermits.
+
+    For each hermit, iterates over all *other* hermits and counts unique shared
+    events (deduplicated by event id).  Also records the number of distinct
+    collab partners (hermits with at least one shared event).
+
+    Args:
+        season_filter: If given, restrict to this season number.
+        type_filter: If given, restrict to events of these types.
+        top_n: Maximum number of entries to return (default 20).
+
+    Returns:
+        List of dicts sorted descending by total_events, then partner_count,
+        then hermit name.  Each dict has keys:
+            rank, hermit, total_events, partner_count, seasons
+    """
+    all_names = _all_hermit_names()
+    cached_events = _load_all_events()
+
+    # Build a map: hermit_name → {event_ids, partner_names, seasons}
+    hermit_data: dict[str, dict] = {
+        name: {"event_ids": set(), "partners": set(), "seasons": set()}
+        for name in all_names
+    }
+
+    # Scan all pairs (A, B) with A < B to avoid double-counting
+    for i, name_a in enumerate(all_names):
+        for name_b in all_names[i + 1:]:
+            shared = find_shared_events(
+                name_a,
+                name_b,
+                season_filter=season_filter,
+                type_filter=type_filter,
+                _events=cached_events,
+            )
+            if not shared:
+                continue
+            for ev in shared:
+                ev_id = ev.get("id") or ev.get("title", "")
+                hermit_data[name_a]["event_ids"].add(ev_id)
+                hermit_data[name_b]["event_ids"].add(ev_id)
+                s = ev.get("season")
+                if isinstance(s, int):
+                    hermit_data[name_a]["seasons"].add(s)
+                    hermit_data[name_b]["seasons"].add(s)
+            hermit_data[name_a]["partners"].add(name_b)
+            hermit_data[name_b]["partners"].add(name_a)
+
+    # Flatten and sort
+    flat = []
+    for name, data in hermit_data.items():
+        total = len(data["event_ids"])
+        if total == 0:
+            continue
+        flat.append({
+            "hermit": name,
+            "total_events": total,
+            "partner_count": len(data["partners"]),
+            "seasons": sorted(data["seasons"]),
+        })
+
+    flat.sort(key=lambda x: (-x["total_events"], -x["partner_count"], x["hermit"].lower()))
+
+    ranked = []
+    for i, entry in enumerate(flat[:top_n], start=1):
+        ranked.append({"rank": i, **entry})
+    return ranked
+
+
+def format_global_leaderboard(
+    ranked: list[dict],
+    season_filter: int | None = None,
+    type_filter: list[str] | None = None,
+) -> str:
+    """Format the global leaderboard as a human-readable table."""
+    season_label = f"Season {season_filter}" if season_filter else "all seasons"
+    type_label = f", types: {', '.join(type_filter)}" if type_filter else ""
+    lines: list[str] = []
+    lines.append(f"Most-connected Hermits ({season_label}{type_label}):")
+    lines.append("")
+
+    if not ranked:
+        lines.append("  (no collaboration data found)")
+        return "\n".join(lines)
+
+    max_name = max(len(e["hermit"]) for e in ranked)
+    col_w = max(max_name, 8)
+
+    for entry in ranked:
+        rank = entry["rank"]
+        hermit = entry["hermit"]
+        total = entry["total_events"]
+        partners = entry["partner_count"]
+        seasons = entry.get("seasons", [])
+        s_str = ", ".join(f"S{s}" for s in seasons[:4])
+        if len(seasons) > 4:
+            s_str += f" +{len(seasons) - 4} more"
+        plural = "s" if total != 1 else " "
+        lines.append(
+            f"  {rank:2d}. {hermit:<{col_w}}  "
+            f"{total:3d} total shared event{plural}  "
+            f"(collab partners: {partners})"
+            + (f"  [{s_str}]" if s_str else "")
+        )
+
+    return "\n".join(lines)
+
+
 def format_top_collabs(
     name_a: str,
     ranked: list[dict],
@@ -378,15 +498,15 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="python -m tools.collab_query",
         description=(
             "Find shared Hermitcraft events between two Hermits. "
-            "Answers 'when did A and B collaborate?' or "
-            "'who does A collaborate with most?' (--top-collabs)."
+            "Answers 'when did A and B collaborate?', "
+            "'who does A collaborate with most?' (--top-collabs), or "
+            "'who are the most socially connected hermits overall?' (--global-leaderboard)."
         ),
     )
     p.add_argument(
         "--hermit-a",
-        required=True,
         metavar="NAME",
-        help="Target Hermit (case-insensitive, partial match ok)",
+        help="Target Hermit (case-insensitive, partial match ok). Required for pairwise and --top-collabs modes.",
     )
     p.add_argument(
         "--hermit-b",
@@ -397,6 +517,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--top-collabs",
         action="store_true",
         help="Leaderboard mode: rank all Hermits by shared-event count with --hermit-a",
+    )
+    p.add_argument(
+        "--global-leaderboard",
+        action="store_true",
+        dest="global_leaderboard",
+        help=(
+            "Global leaderboard mode: rank every Hermit by total shared-event count "
+            "across all others. Composable with --season, --top, --json. "
+            "--hermit-a is not required in this mode."
+        ),
     )
     p.add_argument(
         "--top",
@@ -429,9 +559,39 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    # ── Global leaderboard mode ───────────────────────────────────────────
+    if getattr(args, "global_leaderboard", False):
+        ranked = build_global_leaderboard(
+            season_filter=args.season,
+            type_filter=args.types,
+            top_n=args.top,
+        )
+        if args.json:
+            out: dict = {
+                "mode": "global_leaderboard",
+                "top_n": args.top,
+                "leaderboard": ranked,
+            }
+            if args.season is not None:
+                out["season_filter"] = args.season
+            if args.types is not None:
+                out["type_filter"] = args.types
+            print(json.dumps(out, indent=2))
+        else:
+            print(format_global_leaderboard(
+                ranked,
+                season_filter=args.season,
+                type_filter=args.types,
+            ))
+        return 0
+
+    # All other modes require --hermit-a
+    if not args.hermit_a:
+        parser.error("--hermit-a is required (or use --global-leaderboard)")
+
     # Validate mode
     if not args.top_collabs and args.hermit_b is None:
-        parser.error("--hermit-b is required unless --top-collabs is specified")
+        parser.error("--hermit-b is required unless --top-collabs or --global-leaderboard is specified")
 
     name_a = _resolve_hermit_name(args.hermit_a)
     if name_a is None:
