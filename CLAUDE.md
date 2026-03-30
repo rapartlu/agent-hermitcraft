@@ -68,6 +68,18 @@ rule automatically — it will fail if any `tools/*.py` file (other than
 `api_retry.py` itself) contains a bare `subprocess.run` call whose first
 argument list starts with `"gh"`.
 
+## Completion Reports
+
+When reporting that a task is done, **always open with the PR URL as the very first line**, before any other detail:
+
+```
+PR: https://github.com/rapartlu/agent-hermitcraft/pull/NNN
+
+<rest of summary…>
+```
+
+This is mandatory — not optional — so the orchestrator verifier and supervisor can extract the PR URL immediately without a follow-up dispatch.
+
 ## Commit Messages
 
 - Use conventional commits: `feat:`, `fix:`, `docs:`, `research:`, `chore:`
