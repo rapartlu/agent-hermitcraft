@@ -23,6 +23,8 @@ from tools.season_digest import (
     build_digest,
     build_discord_embed,
     build_highlights,
+    build_most_active_hermits,
+    build_notable_builds,
     build_peak_moment,
     build_stats,
     build_arc_summary,
@@ -885,6 +887,288 @@ class TestCLIDiscord(unittest.TestCase):
     def test_season_colours_all_distinct(self):
         colours = list(_SEASON_COLOURS.values())
         self.assertEqual(len(colours), len(set(colours)))
+
+
+# ---------------------------------------------------------------------------
+# build_most_active_hermits
+# ---------------------------------------------------------------------------
+
+class TestBuildMostActiveHermits(unittest.TestCase):
+
+    def _events(self):
+        return [
+            _make_event(hermits=["Grian", "Scar"], title="Event A"),
+            _make_event(hermits=["Grian", "Mumbo"], title="Event B"),
+            _make_event(hermits=["Grian"], title="Event C"),
+            _make_event(hermits=["Scar"], title="Event D"),
+            _make_event(hermits=["All"], title="Server Event"),
+        ]
+
+    def test_returns_list(self):
+        self.assertIsInstance(build_most_active_hermits(9, self._events()), list)
+
+    def test_top_n_limits(self):
+        result = build_most_active_hermits(9, self._events(), top_n=2)
+        self.assertLessEqual(len(result), 2)
+
+    def test_grian_is_most_active(self):
+        result = build_most_active_hermits(9, self._events(), top_n=5)
+        self.assertEqual(result[0]["hermit"], "Grian")
+
+    def test_grian_event_count_is_3(self):
+        result = build_most_active_hermits(9, self._events(), top_n=5)
+        grian = next(r for r in result if r["hermit"] == "Grian")
+        self.assertEqual(grian["event_count"], 3)
+
+    def test_all_excluded(self):
+        result = build_most_active_hermits(9, self._events(), top_n=10)
+        names = [r["hermit"] for r in result]
+        self.assertNotIn("All", names)
+
+    def test_ranks_sequential(self):
+        result = build_most_active_hermits(9, self._events(), top_n=5)
+        for i, entry in enumerate(result, start=1):
+            self.assertEqual(entry["rank"], i)
+
+    def test_required_keys(self):
+        required = {"rank", "hermit", "event_count"}
+        for entry in build_most_active_hermits(9, self._events(), top_n=5):
+            self.assertTrue(required.issubset(entry.keys()))
+
+    def test_sorted_by_count_desc(self):
+        result = build_most_active_hermits(9, self._events(), top_n=5)
+        counts = [r["event_count"] for r in result]
+        self.assertEqual(counts, sorted(counts, reverse=True))
+
+    def test_empty_events_returns_empty(self):
+        self.assertEqual(build_most_active_hermits(9, []), [])
+
+    def test_only_all_events_returns_empty(self):
+        events = [_make_event(hermits=["All"]) for _ in range(3)]
+        self.assertEqual(build_most_active_hermits(9, events), [])
+
+    def test_default_top_n_is_5(self):
+        events = [_make_event(hermits=[f"Hermit{i}"]) for i in range(10)]
+        result = build_most_active_hermits(9, events)
+        self.assertLessEqual(len(result), 5)
+
+    def test_event_count_is_int(self):
+        result = build_most_active_hermits(9, self._events(), top_n=5)
+        for entry in result:
+            self.assertIsInstance(entry["event_count"], int)
+
+
+# ---------------------------------------------------------------------------
+# build_notable_builds
+# ---------------------------------------------------------------------------
+
+class TestBuildNotableBuilds(unittest.TestCase):
+
+    def _events(self):
+        return [
+            _make_event(type="build", title="Epic Base", hermits=["Grian", "Scar"],
+                        date_precision="day"),
+            _make_event(type="build", title="Small Hut", hermits=["Mumbo"]),
+            _make_event(type="build", title="Mega Farm", hermits=["A", "B", "C", "D"]),
+            _make_event(type="milestone", title="Season Start", hermits=["All"]),
+            _make_event(type="lore", title="Lore Event", hermits=["Grian"]),
+        ]
+
+    def test_returns_list(self):
+        self.assertIsInstance(build_notable_builds(9, self._events()), list)
+
+    def test_top_n_limits(self):
+        self.assertLessEqual(len(build_notable_builds(9, self._events(), top_n=2)), 2)
+
+    def test_only_build_events(self):
+        result = build_notable_builds(9, self._events(), top_n=10)
+        # No milestone or lore events should be present
+        titles = [r["title"] for r in result]
+        self.assertNotIn("Season Start", titles)
+        self.assertNotIn("Lore Event", titles)
+
+    def test_sorted_by_score_desc(self):
+        result = build_notable_builds(9, self._events(), top_n=3)
+        scores = [r["significance_score"] for r in result]
+        self.assertEqual(scores, sorted(scores, reverse=True))
+
+    def test_ranks_sequential(self):
+        result = build_notable_builds(9, self._events(), top_n=3)
+        for i, entry in enumerate(result, start=1):
+            self.assertEqual(entry["rank"], i)
+
+    def test_required_keys(self):
+        required = {"rank", "title", "description", "date", "hermits",
+                    "significance_score"}
+        for entry in build_notable_builds(9, self._events(), top_n=3):
+            self.assertTrue(required.issubset(entry.keys()))
+
+    def test_empty_events_returns_empty(self):
+        self.assertEqual(build_notable_builds(9, []), [])
+
+    def test_no_build_events_returns_empty(self):
+        events = [_make_event(type="milestone"), _make_event(type="lore")]
+        self.assertEqual(build_notable_builds(9, events), [])
+
+    def test_hermits_is_list(self):
+        result = build_notable_builds(9, self._events(), top_n=3)
+        for entry in result:
+            self.assertIsInstance(entry["hermits"], list)
+
+    def test_score_is_int(self):
+        result = build_notable_builds(9, self._events(), top_n=3)
+        for entry in result:
+            self.assertIsInstance(entry["significance_score"], int)
+
+    def test_default_top_n_is_3(self):
+        events = [_make_event(type="build", title=f"Build {i}") for i in range(10)]
+        result = build_notable_builds(9, events)
+        self.assertLessEqual(len(result), 3)
+
+
+# ---------------------------------------------------------------------------
+# build_digest — new keys
+# ---------------------------------------------------------------------------
+
+class TestBuildDigestNewKeys(unittest.TestCase):
+
+    def test_most_active_hermits_present(self):
+        d = build_digest(9)
+        self.assertIn("most_active_hermits", d)
+
+    def test_notable_builds_present(self):
+        d = build_digest(9)
+        self.assertIn("notable_builds", d)
+
+    def test_most_active_hermits_is_list(self):
+        self.assertIsInstance(build_digest(9)["most_active_hermits"], list)
+
+    def test_notable_builds_is_list(self):
+        self.assertIsInstance(build_digest(9)["notable_builds"], list)
+
+    def test_most_active_hermits_entries_have_rank(self):
+        for entry in build_digest(9)["most_active_hermits"]:
+            self.assertIn("rank", entry)
+
+    def test_notable_builds_entries_have_rank(self):
+        for entry in build_digest(9)["notable_builds"]:
+            self.assertIn("rank", entry)
+
+    def test_json_serialisable_with_new_keys(self):
+        import json
+        d = build_digest(9)
+        serialised = json.dumps(d)
+        self.assertIsInstance(serialised, str)
+
+    def test_sparse_season_no_crash(self):
+        d = build_digest(1)
+        self.assertIn("most_active_hermits", d)
+        self.assertIn("notable_builds", d)
+
+
+# ---------------------------------------------------------------------------
+# render_markdown — new sections
+# ---------------------------------------------------------------------------
+
+class TestRenderMarkdownNewSections(unittest.TestCase):
+
+    def _digest(self):
+        return build_digest(9, top_n=3)
+
+    def test_has_most_active_section(self):
+        self.assertIn("## Most Active Hermits", render_markdown(self._digest()))
+
+    def test_has_notable_builds_section(self):
+        self.assertIn("## Notable Builds", render_markdown(self._digest()))
+
+    def test_empty_active_no_crash(self):
+        d = self._digest()
+        d["most_active_hermits"] = []
+        md = render_markdown(d)
+        self.assertIsInstance(md, str)
+        self.assertIn("Most Active Hermits", md)
+
+    def test_empty_builds_no_crash(self):
+        d = self._digest()
+        d["notable_builds"] = []
+        md = render_markdown(d)
+        self.assertIsInstance(md, str)
+        self.assertIn("Notable Builds", md)
+
+    def test_word_count_under_800(self):
+        md = render_markdown(self._digest())
+        # Strip markdown punctuation then count words
+        import re
+        plain = re.sub(r"[#*>`\-_]", " ", md)
+        word_count = len(plain.split())
+        self.assertLessEqual(
+            word_count, 800,
+            f"Digest markdown exceeds 800 words: {word_count} words",
+        )
+
+    def test_active_hermit_name_in_output(self):
+        d = self._digest()
+        if d["most_active_hermits"]:
+            top_hermit = d["most_active_hermits"][0]["hermit"]
+            self.assertIn(top_hermit, render_markdown(d))
+
+    def test_notable_build_title_in_output(self):
+        d = self._digest()
+        if d["notable_builds"]:
+            top_build_title = d["notable_builds"][0]["title"]
+            self.assertIn(top_build_title, render_markdown(d))
+
+
+# ---------------------------------------------------------------------------
+# Discord embed — new fields
+# ---------------------------------------------------------------------------
+
+class TestDiscordEmbedNewFields(unittest.TestCase):
+
+    def _embed(self, season: int = 9) -> dict:
+        return build_discord_embed(build_digest(season))
+
+    def test_most_active_field_present(self):
+        names = [f["name"] for f in self._embed()["fields"]]
+        self.assertTrue(any("Active" in n for n in names),
+                        f"No 'Active' field in: {names}")
+
+    def test_limits_still_hold_with_new_fields(self):
+        embed = self._embed()
+        total = len(embed.get("title", ""))
+        for f in embed.get("fields", []):
+            self.assertLessEqual(len(f["value"]), _DISCORD_FIELD_VALUE_LIMIT,
+                                 f"Field '{f['name']}' over limit")
+            total += len(f.get("name", "")) + len(f.get("value", ""))
+        total += len(embed.get("footer", {}).get("text", ""))
+        self.assertLessEqual(total, _DISCORD_EMBED_TOTAL_LIMIT)
+
+    def test_all_seasons_limits_hold(self):
+        for s in KNOWN_SEASONS:
+            embed = self._embed(s)
+            for f in embed["fields"]:
+                self.assertLessEqual(
+                    len(f["value"]), _DISCORD_FIELD_VALUE_LIMIT,
+                    f"Season {s} field '{f['name']}' over limit",
+                )
+            total = len(embed.get("title", ""))
+            for f in embed.get("fields", []):
+                total += len(f.get("name", "")) + len(f.get("value", ""))
+            total += len(embed.get("footer", {}).get("text", ""))
+            self.assertLessEqual(total, _DISCORD_EMBED_TOTAL_LIMIT,
+                                 f"Season {s} total embed over limit")
+
+    def test_empty_active_no_crash(self):
+        digest = build_digest(9)
+        digest["most_active_hermits"] = []
+        embed = build_discord_embed(digest)
+        self.assertIsInstance(embed, dict)
+
+    def test_empty_builds_no_crash(self):
+        digest = build_digest(9)
+        digest["notable_builds"] = []
+        embed = build_discord_embed(digest)
+        self.assertIsInstance(embed, dict)
 
 
 if __name__ == "__main__":

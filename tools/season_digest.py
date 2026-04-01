@@ -264,6 +264,61 @@ def build_collaborations(season: int, events: list[dict], top_n: int) -> list[di
     return results
 
 
+def build_most_active_hermits(
+    season: int, events: list[dict], top_n: int = 5
+) -> list[dict]:
+    """
+    Return the *top_n* most frequently appearing hermits in *events*.
+
+    "All" entries are excluded — only named hermits are counted.
+
+    Each entry: rank, hermit, event_count
+    """
+    counter: collections.Counter = collections.Counter()
+    for ev in events:
+        for h in ev.get("hermits", []):
+            if h != "All":
+                counter[h] += 1
+
+    results: list[dict] = []
+    for rank, (hermit, count) in enumerate(counter.most_common(top_n), start=1):
+        results.append({"rank": rank, "hermit": hermit, "event_count": count})
+    return results
+
+
+def build_notable_builds(
+    season: int, events: list[dict], top_n: int = 3
+) -> list[dict]:
+    """
+    Return the *top_n* most significant build events for *season*.
+
+    Only events with ``type == "build"`` are considered; they are ranked by
+    the same significance score used elsewhere in the digest.
+
+    Each entry: rank, title, description, date, hermits, significance_score
+    """
+    build_events = [ev for ev in events if ev.get("type") == "build"]
+    scored = [
+        (_significance_score(ev), _event_sort_key(ev), ev)
+        for ev in build_events
+    ]
+    scored.sort(key=lambda x: (-x[0], x[1]))
+
+    results: list[dict] = []
+    for rank, (score, _, ev) in enumerate(scored[:top_n], start=1):
+        results.append(
+            {
+                "rank": rank,
+                "title": ev.get("title", "(untitled)"),
+                "description": ev.get("description", ""),
+                "date": ev.get("date", ""),
+                "hermits": ev.get("hermits", []),
+                "significance_score": score,
+            }
+        )
+    return results
+
+
 def build_arc_summary(season: int, stats: dict, highlights: list[dict]) -> str:
     """
     One-paragraph narrative arc synthesised from milestone/lore highlights.
@@ -317,16 +372,23 @@ def build_arc_summary(season: int, stats: dict, highlights: list[dict]) -> str:
 # Digest assembler
 # ---------------------------------------------------------------------------
 
+_DEFAULT_TOP_ACTIVE = 5
+_DEFAULT_TOP_BUILDS = 3
+
+
 def build_digest(
     season: int,
     top_n: int = _DEFAULT_TOP_N,
     top_pairs: int = _DEFAULT_TOP_PAIRS,
+    top_active: int = _DEFAULT_TOP_ACTIVE,
+    top_builds: int = _DEFAULT_TOP_BUILDS,
 ) -> dict:
     """
     Assemble a full Season in Review digest for *season*.
 
     Returns a structured dict with keys:
-        season, stats, highlights, peak_moment, collaborations, arc_summary
+        season, stats, highlights, peak_moment, collaborations, arc_summary,
+        most_active_hermits, notable_builds
 
     Never raises for known seasons with sparse data — sections will be empty
     rather than absent.
@@ -339,6 +401,8 @@ def build_digest(
     peak = build_peak_moment(season, events)
     collabs = build_collaborations(season, events, top_pairs)
     arc = build_arc_summary(season, stats, highlights)
+    active = build_most_active_hermits(season, events, top_active)
+    builds = build_notable_builds(season, events, top_builds)
 
     return {
         "season": season,
@@ -347,6 +411,8 @@ def build_digest(
         "peak_moment": peak,
         "collaborations": collabs,
         "arc_summary": arc,
+        "most_active_hermits": active,
+        "notable_builds": builds,
     }
 
 
@@ -370,6 +436,8 @@ def render_markdown(digest: dict) -> str:
     peak = digest.get("peak_moment")
     collabs = digest.get("collaborations", [])
     arc = digest.get("arc_summary", "")
+    active = digest.get("most_active_hermits", [])
+    builds = digest.get("notable_builds", [])
 
     lines: list[str] = []
 
@@ -435,6 +503,42 @@ def render_markdown(digest: dict) -> str:
             lines.append("")
     else:
         lines.append("*No highlights data available for this season.*")
+        lines.append("")
+
+    # ── Most active hermits ─────────────────────────────────────────────────
+    lines += ["## Most Active Hermits", ""]
+    if active:
+        for entry in active:
+            rank = entry["rank"]
+            hermit = entry["hermit"]
+            count = entry["event_count"]
+            plural = "s" if count != 1 else ""
+            lines.append(f"{rank}. **{hermit}** — {count} event{plural}")
+        lines.append("")
+    else:
+        lines.append("*No hermit activity data available for this season.*")
+        lines.append("")
+
+    # ── Notable builds ─────────────────────────────────────────────────────
+    lines += ["## Notable Builds", ""]
+    if builds:
+        for entry in builds:
+            rank = entry["rank"]
+            title = entry["title"]
+            desc = entry.get("description", "")
+            date = entry.get("date", "")
+            hermits = entry.get("hermits", [])
+            score = entry.get("significance_score", 0)
+
+            lines.append(f"### {rank}. {title}")
+            meta_parts = [p for p in [date, _md_hermits(hermits),
+                                      f"score: {score}"] if p]
+            lines.append(f"*{' · '.join(meta_parts)}*")
+            if desc:
+                lines += ["", desc]
+            lines.append("")
+    else:
+        lines.append("*No notable build events recorded for this season.*")
         lines.append("")
 
     # ── Collaborations ─────────────────────────────────────────────────────
@@ -586,6 +690,37 @@ def _discord_collabs_value(collabs: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _discord_active_value(active: list[dict]) -> str:
+    """Numbered list of most active hermits."""
+    if not active:
+        return "*No hermit activity data available.*"
+    lines: list[str] = []
+    for entry in active:
+        line = f"{entry['rank']}. **{entry['hermit']}** — {entry['event_count']} event{'s' if entry['event_count'] != 1 else ''}"
+        candidate = "\n".join(lines + [line])
+        if len(candidate) > _DISCORD_FIELD_VALUE_LIMIT - 4:
+            lines.append(" …")
+            break
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _discord_builds_value(builds: list[dict]) -> str:
+    """Numbered list of notable builds."""
+    if not builds:
+        return "*No notable build events recorded.*"
+    lines: list[str] = []
+    for entry in builds:
+        hermit_str = _md_hermits(entry.get("hermits", []))
+        line = f"{entry['rank']}. **{entry['title']}** — {hermit_str}"
+        candidate = "\n".join(lines + [line])
+        if len(candidate) > _DISCORD_FIELD_VALUE_LIMIT - 4:
+            lines.append(" …")
+            break
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def build_discord_embed(digest: dict) -> dict:
     """
     Build a Discord embed dict from *digest*.
@@ -603,11 +738,13 @@ def build_discord_embed(digest: dict) -> dict:
             "title":  "🏆 Hermitcraft Season N — Season in Review",
             "color":  <int>,
             "fields": [
-                {"name": "📊 Quick Stats",         "value": "…", "inline": False},
-                {"name": "📖 Season Arc",           "value": "…", "inline": False},
-                {"name": "🌟 Peak Moment",          "value": "…", "inline": False},
-                {"name": "🏅 Top Highlights",       "value": "…", "inline": False},
-                {"name": "🤝 Notable Collaborations","value": "…", "inline": False},
+                {"name": "📊 Quick Stats",           "value": "…", "inline": False},
+                {"name": "📖 Season Arc",             "value": "…", "inline": False},
+                {"name": "🌟 Peak Moment",            "value": "…", "inline": False},
+                {"name": "🏅 Top Highlights",         "value": "…", "inline": False},
+                {"name": "🏃 Most Active Hermits",    "value": "…", "inline": False},
+                {"name": "🏗️ Notable Builds",        "value": "…", "inline": False},
+                {"name": "🤝 Notable Collaborations", "value": "…", "inline": False},
             ],
             "footer": {"text": "hermitcraft-agent • /digest season N"},
         }
@@ -618,6 +755,8 @@ def build_discord_embed(digest: dict) -> dict:
     peak = digest.get("peak_moment")
     collabs = digest.get("collaborations", [])
     arc = digest.get("arc_summary", "")
+    active = digest.get("most_active_hermits", [])
+    builds = digest.get("notable_builds", [])
 
     title = _truncate(
         f"🏆 Hermitcraft Season {season} — Season in Review",
@@ -659,6 +798,25 @@ def build_discord_embed(digest: dict) -> dict:
             {
                 "name": f"🏅 Top {len(highlights)} Highlights",
                 "value": _discord_highlights_value(highlights),
+                "inline": False,
+            }
+        )
+
+    fields.append(
+        {
+            "name": "🏃 Most Active Hermits",
+            "value": _truncate(_discord_active_value(active),
+                               _DISCORD_FIELD_VALUE_LIMIT),
+            "inline": False,
+        }
+    )
+
+    if builds:
+        fields.append(
+            {
+                "name": "🏗️ Notable Builds",
+                "value": _truncate(_discord_builds_value(builds),
+                                   _DISCORD_FIELD_VALUE_LIMIT),
                 "inline": False,
             }
         )
