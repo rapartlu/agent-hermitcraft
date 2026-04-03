@@ -16,9 +16,12 @@ from tools.search import (
     HERMITS_DIR,
     SEASONS_DIR,
     VIDEO_EVENTS_FILE,
+    _REPL_HELP,
+    _build_repl_parser,
     _count_matches,
     _tokenise_query,
     format_search_results,
+    interactive_session,
     make_snippet,
     run_search,
     score_result,
@@ -477,6 +480,264 @@ class TestDataIntegrity(unittest.TestCase):
         self.assertGreater(len(results), 0)
 
 
+# ---------------------------------------------------------------------------
+# _build_repl_parser
+# ---------------------------------------------------------------------------
+
+class TestBuildReplParser(unittest.TestCase):
+
+    def _parse(self, line: str):
+        import shlex
+        parser = _build_repl_parser()
+        args, _ = parser.parse_known_args(shlex.split(line))
+        return args
+
+    def test_plain_words_become_query(self):
+        args = self._parse("boatem hole")
+        self.assertEqual(args.query_words, ["boatem", "hole"])
+
+    def test_season_flag_parsed(self):
+        args = self._parse("grian --season 9")
+        self.assertEqual(args.season, 9)
+
+    def test_limit_flag_parsed(self):
+        args = self._parse("grian --limit 5")
+        self.assertEqual(args.limit, 5)
+
+    def test_sources_flag_parsed(self):
+        args = self._parse("grian --sources events hermits")
+        self.assertIn("events", args.sources)
+        self.assertIn("hermits", args.sources)
+
+    def test_json_flag_parsed(self):
+        args = self._parse("grian --json")
+        self.assertTrue(args.as_json)
+
+    def test_default_limit_is_20(self):
+        args = self._parse("grian")
+        self.assertEqual(args.limit, 20)
+
+    def test_default_season_is_none(self):
+        args = self._parse("grian")
+        self.assertIsNone(args.season)
+
+    def test_default_json_is_false(self):
+        args = self._parse("grian")
+        self.assertFalse(args.as_json)
+
+    def test_mixed_query_and_flags(self):
+        args = self._parse("prank grian --season 6 --limit 3")
+        self.assertEqual(args.query_words, ["prank", "grian"])
+        self.assertEqual(args.season, 6)
+        self.assertEqual(args.limit, 3)
+
+
+# ---------------------------------------------------------------------------
+# interactive_session
+# ---------------------------------------------------------------------------
+
+class TestInteractiveSession(unittest.TestCase):
+    """Test the REPL by mocking builtins.input."""
+
+    def _run_session(self, inputs: list[str]) -> tuple[int, str, str]:
+        import io
+        from contextlib import redirect_stdout, redirect_stderr
+        from unittest.mock import patch
+
+        input_iter = iter(inputs)
+
+        def fake_input(prompt=""):
+            try:
+                return next(input_iter)
+            except StopIteration:
+                raise EOFError()
+
+        out_buf, err_buf = io.StringIO(), io.StringIO()
+        with redirect_stdout(out_buf), redirect_stderr(err_buf):
+            with patch("builtins.input", side_effect=fake_input):
+                with patch("tools.search._readline_setup", return_value=None):
+                    rc = interactive_session()
+        return rc, out_buf.getvalue(), err_buf.getvalue()
+
+    def test_quit_exits_0(self):
+        rc, _, _ = self._run_session(["quit"])
+        self.assertEqual(rc, 0)
+
+    def test_exit_exits_0(self):
+        rc, _, _ = self._run_session(["exit"])
+        self.assertEqual(rc, 0)
+
+    def test_eof_exits_0(self):
+        rc, _, _ = self._run_session([])
+        self.assertEqual(rc, 0)
+
+    def test_help_prints_flags(self):
+        _, out, _ = self._run_session(["help", "quit"])
+        self.assertIn("--season", out)
+        self.assertIn("--limit", out)
+
+    def test_question_mark_shows_help(self):
+        _, out, _ = self._run_session(["?", "quit"])
+        self.assertIn("--season", out)
+
+    def test_empty_line_no_crash(self):
+        rc, _, _ = self._run_session(["", "quit"])
+        self.assertEqual(rc, 0)
+
+    def test_whitespace_line_no_crash(self):
+        rc, _, _ = self._run_session(["   ", "quit"])
+        self.assertEqual(rc, 0)
+
+    def test_valid_query_produces_output(self):
+        _, out, _ = self._run_session(["grian", "quit"])
+        self.assertGreater(len(out), 0)
+
+    def test_valid_query_shows_term_in_output(self):
+        _, out, _ = self._run_session(["boatem", "quit"])
+        self.assertTrue("boatem" in out.lower() or "result" in out.lower())
+
+    def test_season_flag_in_query(self):
+        rc, _, _ = self._run_session(["grian --season 9", "quit"])
+        self.assertEqual(rc, 0)
+
+    def test_limit_flag_in_query(self):
+        rc, _, _ = self._run_session(["grian --limit 2", "quit"])
+        self.assertEqual(rc, 0)
+
+    def test_json_flag_produces_json(self):
+        _, out, _ = self._run_session(["grian --json", "quit"])
+        # Find the { that starts the JSON block
+        idx = out.find("{")
+        if idx != -1:
+            data = json.loads(out[idx:out.rindex("}") + 1])
+            self.assertIn("query", data)
+
+    def test_unrecognised_flag_warns_stderr(self):
+        _, _, err = self._run_session(["grian --badflagnobodyuses", "quit"])
+        self.assertIsInstance(err, str)
+
+    def test_ctrl_c_mid_line_continues(self):
+        from unittest.mock import patch
+        import io
+        from contextlib import redirect_stdout, redirect_stderr
+
+        call_count = [0]
+
+        def fake_input_kb(prompt=""):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise KeyboardInterrupt()
+            if call_count[0] == 2:
+                return "quit"
+            raise EOFError()
+
+        out_buf, err_buf = io.StringIO(), io.StringIO()
+        with redirect_stdout(out_buf), redirect_stderr(err_buf):
+            with patch("builtins.input", side_effect=fake_input_kb):
+                with patch("tools.search._readline_setup", return_value=None):
+                    rc = interactive_session()
+
+        self.assertEqual(rc, 0)
+        self.assertGreaterEqual(call_count[0], 2)
+
+    def test_multiple_queries_in_session(self):
+        rc, out, _ = self._run_session(["grian", "mumbo", "quit"])
+        self.assertEqual(rc, 0)
+        self.assertIn("grian", out.lower())
+
+    def test_no_query_words_warns_stderr(self):
+        _, _, err = self._run_session(["--season 9", "quit"])
+        self.assertIsInstance(err, str)
+
+    def test_banner_printed_on_start(self):
+        _, out, _ = self._run_session(["quit"])
+        self.assertIn("search", out.lower())
+
+    def test_quit_case_insensitive(self):
+        rc, _, _ = self._run_session(["QUIT"])
+        self.assertEqual(rc, 0)
+
+
+# ---------------------------------------------------------------------------
+# CLI — --interactive flag
+# ---------------------------------------------------------------------------
+
+class TestCLIInteractive(unittest.TestCase):
+
+    def _run(self, argv: list[str], inputs: list[str] = None) -> tuple[int, str, str]:
+        import io
+        from contextlib import redirect_stdout, redirect_stderr
+        from unittest.mock import patch
+        from tools.search import main as search_main
+
+        inputs = inputs or []
+        input_iter = iter(inputs)
+
+        def fake_input(prompt=""):
+            try:
+                return next(input_iter)
+            except StopIteration:
+                raise EOFError()
+
+        out_buf, err_buf = io.StringIO(), io.StringIO()
+        with redirect_stdout(out_buf), redirect_stderr(err_buf):
+            with patch("builtins.input", side_effect=fake_input):
+                with patch("tools.search._readline_setup", return_value=None):
+                    try:
+                        rc = search_main(argv)
+                    except SystemExit as e:
+                        rc = int(e.code) if e.code is not None else 0
+        return rc, out_buf.getvalue(), err_buf.getvalue()
+
+    def test_interactive_flag_exits_0(self):
+        rc, _, _ = self._run(["--interactive"], inputs=["quit"])
+        self.assertEqual(rc, 0)
+
+    def test_interactive_short_flag(self):
+        rc, _, _ = self._run(["-i"], inputs=["quit"])
+        self.assertEqual(rc, 0)
+
+    def test_no_query_no_interactive_exits_nonzero(self):
+        rc, _, _ = self._run([])
+        self.assertNotEqual(rc, 0)
+
+    def test_interactive_produces_output(self):
+        _, out, _ = self._run(["--interactive"], inputs=["boatem", "quit"])
+        self.assertGreater(len(out.strip()), 0)
+
+    def test_interactive_handles_eof_gracefully(self):
+        rc, _, _ = self._run(["--interactive"], inputs=[])
+        self.assertEqual(rc, 0)
+
+
+# ---------------------------------------------------------------------------
+# _REPL_HELP constant
+# ---------------------------------------------------------------------------
+
+class TestReplHelp(unittest.TestCase):
+
+    def test_help_is_string(self):
+        self.assertIsInstance(_REPL_HELP, str)
+
+    def test_help_contains_season_flag(self):
+        self.assertIn("--season", _REPL_HELP)
+
+    def test_help_contains_limit_flag(self):
+        self.assertIn("--limit", _REPL_HELP)
+
+    def test_help_contains_sources_flag(self):
+        self.assertIn("--sources", _REPL_HELP)
+
+    def test_help_contains_quit_instruction(self):
+        self.assertIn("quit", _REPL_HELP.lower())
+
+    def test_help_contains_json_flag(self):
+        self.assertIn("--json", _REPL_HELP)
+
+    def test_help_nonempty(self):
+        self.assertGreater(len(_REPL_HELP), 20)
+
+
 if __name__ == "__main__":
     import traceback
 
@@ -492,6 +753,10 @@ if __name__ == "__main__":
         ("format_results",    unittest.TestLoader().loadTestsFromTestCase(TestFormatSearchResults)),
         ("CLI",               unittest.TestLoader().loadTestsFromTestCase(TestCLI)),
         ("data_integrity",    unittest.TestLoader().loadTestsFromTestCase(TestDataIntegrity)),
+        ("repl_parser",       unittest.TestLoader().loadTestsFromTestCase(TestBuildReplParser)),
+        ("interactive",       unittest.TestLoader().loadTestsFromTestCase(TestInteractiveSession)),
+        ("cli_interactive",   unittest.TestLoader().loadTestsFromTestCase(TestCLIInteractive)),
+        ("repl_help",         unittest.TestLoader().loadTestsFromTestCase(TestReplHelp)),
     ]
 
     passed = failed = 0

@@ -13,6 +13,31 @@ Usage
   python3 tools/search.py --query "Decked Out" --season 7
   python3 tools/search.py --query "redstone" --sources events hermits
   python3 tools/search.py --query "mycelium" --limit 5
+  python3 tools/search.py --interactive        # launch REPL
+
+Interactive REPL
+----------------
+  $ python3 tools/search.py --interactive
+
+  Hermitcraft Search > boatem hole
+    3 results for "boatem hole" …
+
+  Hermitcraft Search > prank grian --season 6
+    5 results …
+
+  Hermitcraft Search > help
+    (lists available flags)
+
+  Hermitcraft Search > quit
+
+  REPL flags (optional, per-query):
+    --season N        Restrict to a specific season
+    --sources S ...   Which sources to search (events hermits seasons)
+    --limit N         Max results (default 20)
+    --json            Output as JSON
+
+  Session history persisted to ~/.hermitcraft_search_history (readline).
+  Ctrl-D or type 'quit' / 'exit' to leave.
 
 Sources searched (default: all)
 ---------------------------------
@@ -42,6 +67,7 @@ Exit codes
 import argparse
 import json
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -383,6 +409,169 @@ def format_search_results(query: str, results: list[dict]) -> str:
 # CLI
 # ---------------------------------------------------------------------------
 
+_REPL_HISTORY_FILE = Path.home() / ".hermitcraft_search_history"
+
+_REPL_HELP = """
+Interactive search flags (append to your query on the same line):
+  --season N          Restrict to a specific season number (1–11)
+  --sources S [S...]  Limit sources: events, hermits, seasons
+  --limit N           Max results (default 20)
+  --json              Output as JSON instead of text
+
+Special commands:
+  help                Show this help
+  quit / exit         Exit the REPL (also Ctrl-D)
+
+Examples:
+  Hermitcraft Search > boatem hole
+  Hermitcraft Search > prank grian --season 6
+  Hermitcraft Search > decked out --sources events --limit 5
+  Hermitcraft Search > mycelium resistance --json
+""".strip()
+
+
+def _build_repl_parser() -> argparse.ArgumentParser:
+    """Argument parser used inside the REPL — query is positional, all flags optional."""
+    p = argparse.ArgumentParser(
+        prog="search",
+        description="Hermitcraft interactive search",
+        add_help=False,  # we handle 'help' ourselves
+    )
+    p.add_argument(
+        "query_words",
+        nargs="*",
+        help="Search terms",
+    )
+    p.add_argument(
+        "--sources",
+        nargs="+",
+        choices=list(ALL_SOURCES),
+        default=list(ALL_SOURCES),
+        metavar="SOURCE",
+    )
+    p.add_argument(
+        "--season",
+        type=int,
+        metavar="N",
+        default=None,
+    )
+    p.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        metavar="N",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+    )
+    return p
+
+
+def _readline_setup() -> None:
+    """Configure readline with history persistence (best-effort; no crash if unavailable)."""
+    try:
+        import readline  # noqa: PLC0415  # not available on all platforms
+        if _REPL_HISTORY_FILE.exists():
+            readline.read_history_file(str(_REPL_HISTORY_FILE))
+        readline.set_history_length(500)
+        import atexit
+        atexit.register(readline.write_history_file, str(_REPL_HISTORY_FILE))
+    except (ImportError, OSError):
+        pass
+
+
+def interactive_session() -> int:
+    """
+    Run the interactive search REPL.
+
+    Each input line is parsed by ``_build_repl_parser()``: leading words
+    before the first ``--flag`` are treated as the query; flag tokens are
+    handled exactly as in the CLI.
+
+    Returns 0 on clean exit (quit / Ctrl-D), 1 if an unrecoverable error
+    occurs.
+    """
+    _readline_setup()
+    repl_parser = _build_repl_parser()
+
+    prompt = "Hermitcraft Search > "
+    print("Hermitcraft interactive search  (type 'help' for flags, 'quit' to exit)")
+
+    while True:
+        try:
+            raw = input(prompt)
+        except EOFError:
+            # Ctrl-D
+            print()  # newline after prompt
+            break
+        except KeyboardInterrupt:
+            # Ctrl-C mid-line: clear the line and continue
+            print()
+            continue
+
+        line = raw.strip()
+        if not line:
+            continue
+
+        # Special commands
+        lower = line.lower()
+        if lower in ("quit", "exit", "q"):
+            break
+        if lower in ("help", "?"):
+            print(_REPL_HELP)
+            continue
+
+        # Parse query + optional flags
+        try:
+            tokens = shlex.split(line)
+        except ValueError as exc:
+            sys.stderr.write(f"  [search] Parse error: {exc}\n")
+            continue
+
+        try:
+            args, unknown = repl_parser.parse_known_args(tokens)
+        except SystemExit:
+            # argparse called sys.exit on bad flag; absorb it
+            sys.stderr.write("  [search] Bad flag. Type 'help' to see valid options.\n")
+            continue
+
+        if unknown:
+            sys.stderr.write(
+                f"  [search] Unrecognised option(s): {' '.join(unknown)}.  "
+                "Type 'help' for flags.\n"
+            )
+            continue
+
+        query = " ".join(args.query_words).strip()
+        if not query:
+            sys.stderr.write("  [search] Please enter search terms.  Type 'help' for usage.\n")
+            continue
+
+        # Run the search
+        results = run_search(
+            query=query,
+            sources=args.sources,
+            season_filter=args.season,
+            limit=args.limit,
+        )
+
+        if args.as_json:
+            payload = {
+                "query": query,
+                "sources": args.sources,
+                "season_filter": args.season,
+                "result_count": len(results),
+                "results": results,
+            }
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            print(format_search_results(query, results))
+
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="search",
@@ -394,8 +583,16 @@ def _build_parser() -> argparse.ArgumentParser:
         epilog=__doc__,
     )
     parser.add_argument(
+        "--interactive", "-i",
+        action="store_true",
+        help=(
+            "Launch an interactive search REPL.  "
+            "Session history is persisted to ~/.hermitcraft_search_history."
+        ),
+    )
+    parser.add_argument(
         "--query", "-q",
-        required=True,
+        required=False,
         metavar="KEYWORDS",
         help="Search terms (space-separated, OR logic across terms).",
     )
@@ -435,6 +632,15 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    # Interactive REPL mode
+    if args.interactive:
+        return interactive_session()
+
+    # Non-interactive mode requires --query
+    if not args.query:
+        sys.stderr.write("[search] --query is required (or use --interactive).\n")
+        return 2
 
     if args.limit < 1:
         sys.stderr.write("[search] --limit must be ≥ 1\n")
