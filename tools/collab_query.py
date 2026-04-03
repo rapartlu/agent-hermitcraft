@@ -8,13 +8,54 @@ Iskall build together in Season 7?".
 Also supports a leaderboard mode that ranks all hermits by shared-event count
 with a single target hermit.
 
+HTTP API contract
+-----------------
+GET /hermits/:name/collaborators
+    Returns a ranked list of hermits that collaborated most with :name.
+    Query params (optional):
+        season=N       Restrict to a specific season
+        type=TYPE,...  Restrict to event types (e.g. build,collab,lore)
+        top=N          Max results (default 10)
+
+    Response (JSON):
+        {
+            "hermit": "Grian",
+            "top_n": 10,
+            "leaderboard": [
+                {"rank": 1, "hermit": "Mumbo", "event_count": 8,
+                 "seasons": [6, 7, 8]},
+                ...
+            ]
+        }
+
+GET /collaborations?a=<hermit>&b=<hermit>
+    Returns all timestamped shared events between two specific hermits.
+    Query params (optional):
+        season=N       Restrict to a specific season
+        type=TYPE,...  Restrict to event types
+
+    Response (JSON):
+        {
+            "hermit_a": "Grian",
+            "hermit_b": "MumboJumbo",
+            "event_count": 8,
+            "seasons_with_collabs": [6, 7, 8],
+            "events": [
+                {"date": "2019-04-20", "season": 6, "type": "collab",
+                 "title": "...", "description": "..."},
+                ...
+            ]
+        }
+
+    404 (exit 1): if either hermit name is not found in the knowledge base.
+
 Usage:
     python -m tools.collab_query --hermit-a Grian --hermit-b Mumbo
     python -m tools.collab_query --hermit-a TangoTek --hermit-b Iskall85 --season 7
     python -m tools.collab_query --hermit-a EthosLab --hermit-b BdoubleO100 --json
     python -m tools.collab_query --hermit-a Grian --hermit-b Scar --types lore build
 
-    # Top-collaborators leaderboard mode:
+    # Top-collaborators / GET /hermits/:name/collaborators:
     python -m tools.collab_query --hermit-a Grian --top-collabs
     python -m tools.collab_query --hermit-a TangoTek --top-collabs --top 5
     python -m tools.collab_query --hermit-a Iskall85 --top-collabs --season 8
