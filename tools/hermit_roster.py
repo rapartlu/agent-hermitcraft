@@ -45,6 +45,30 @@ from pathlib import Path
 _HERMITS_DIR = Path(__file__).parent.parent / "knowledge" / "hermits"
 KNOWN_SEASONS: list[int] = list(range(1, 12))  # seasons 1–11
 
+_DEFAULT_LIMIT = 20
+_MAX_LIMIT = 100
+
+
+def paginate(items: list, limit: int, offset: int) -> dict:
+    """
+    Return a pagination envelope for *items*.
+
+    Response shape::
+
+        {"total": <int>, "limit": <int>, "offset": <int>, "items": [...]}
+
+    Limit is capped at _MAX_LIMIT.  An offset beyond the total returns an
+    empty items list (not an error).
+    """
+    limit = max(1, min(limit, _MAX_LIMIT))
+    offset = max(0, offset)
+    return {
+        "total": len(items),
+        "limit": limit,
+        "offset": offset,
+        "items": items[offset: offset + limit],
+    }
+
 
 # ---------------------------------------------------------------------------
 # Frontmatter parser (no external deps)
@@ -403,6 +427,23 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Output as JSON",
     )
+    p.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            f"Page size for list results (default {_DEFAULT_LIMIT}, "
+            f"max {_MAX_LIMIT}). Activates pagination envelope in JSON output."
+        ),
+    )
+    p.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Zero-based starting index for pagination (default 0).",
+    )
     return p
 
 
@@ -412,12 +453,20 @@ def main(argv: list[str] | None = None) -> int:
 
     roster = load_roster()
 
+    # Determine if pagination was explicitly requested
+    use_pagination = args.limit is not None or args.offset != 0
+    limit = args.limit if args.limit is not None else _DEFAULT_LIMIT
+
     # ── --all ──────────────────────────────────────────────────────────────
     if args.all:
         entries = all_hermits(roster)
         if args.json:
-            print(json.dumps({"hermit_count": len(entries), "hermits": entries},
-                             indent=2))
+            if use_pagination:
+                page = paginate(entries, limit=limit, offset=args.offset)
+                print(json.dumps(page, indent=2))
+            else:
+                print(json.dumps({"hermit_count": len(entries), "hermits": entries},
+                                 indent=2))
         else:
             print(format_all_text(entries))
         return 0
@@ -426,11 +475,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.season is not None:
         active = hermits_for_season(roster, args.season)
         if args.json:
-            print(json.dumps(
-                {"season": args.season, "hermit_count": len(active),
-                 "hermits": active},
-                indent=2,
-            ))
+            if use_pagination:
+                page = paginate(active, limit=limit, offset=args.offset)
+                page["season"] = args.season
+                print(json.dumps(page, indent=2))
+            else:
+                print(json.dumps(
+                    {"season": args.season, "hermit_count": len(active),
+                     "hermits": active},
+                    indent=2,
+                ))
         else:
             print(format_season_text(args.season, active))
         return 0

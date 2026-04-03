@@ -15,19 +15,28 @@ Usage
   python3 tools/timeline.py --season 6 --hermit Iskall85
   python3 tools/timeline.py --season 8 --type milestone
   python3 tools/timeline.py --stats                     # summary stats
+  python3 tools/timeline.py --limit 10 --offset 20     # paginated slice
 
 Filters can be combined; all supplied filters must match (AND logic).
 Keyword search checks title, description, and hermit names.
 
+Pagination
+----------
+Use --limit N (default 20, max 100) and --offset N (default 0) to page
+through results.  When either flag is given the output is a JSON envelope:
+  {"total": <int>, "limit": <int>, "offset": <int>, "items": [...]}
+An offset beyond the total returns an empty items array (not an error).
+
 Output
 ------
-Always newline-delimited JSON objects (one per line) so results pipe
-cleanly into `jq`.  Use --pretty for indented multi-line JSON array.
+Without pagination flags: newline-delimited JSON objects (one per line)
+so results pipe cleanly into `jq`.  Use --pretty for indented JSON array.
+With pagination flags: always a single JSON envelope object.
 
 Exit codes
 ----------
-  0  success (≥1 results)
-  1  no events match the given filters
+  0  success (≥1 results, or paginated response)
+  1  no events match the given filters (non-paginated mode only)
   2  bad arguments or events file not found
 """
 
@@ -38,6 +47,38 @@ import sys
 from pathlib import Path
 
 EVENTS_FILE = Path(__file__).parent.parent / "knowledge" / "timelines" / "events.json"
+
+_DEFAULT_LIMIT = 20
+_MAX_LIMIT = 100
+
+
+def paginate(items: list, limit: int, offset: int) -> dict:
+    """
+    Return a pagination envelope for *items*.
+
+    Args:
+        items:   The full (already-filtered) list to page.
+        limit:   Maximum number of items to return (capped at _MAX_LIMIT).
+        offset:  Zero-based starting index.  Values beyond len(items) return
+                 an empty ``items`` list — never an error.
+
+    Returns::
+
+        {
+            "total":  <int>,   # total number of matching items before slicing
+            "limit":  <int>,   # effective limit (≤ _MAX_LIMIT)
+            "offset": <int>,   # effective offset (≥ 0)
+            "items":  [...]    # the sliced page
+        }
+    """
+    limit = max(1, min(limit, _MAX_LIMIT))
+    offset = max(0, offset)
+    return {
+        "total": len(items),
+        "limit": limit,
+        "offset": offset,
+        "items": items[offset: offset + limit],
+    }
 
 VALID_TYPES = {"build", "collab", "game", "lore", "meta", "milestone"}
 
@@ -167,6 +208,17 @@ def main(argv: list[str] | None = None) -> int:
         "--pretty", action="store_true",
         help="Output a pretty-printed JSON array instead of NDJSON",
     )
+    parser.add_argument(
+        "--limit", type=int, default=None, metavar="N",
+        help=(
+            f"Page size: max items to return (default {_DEFAULT_LIMIT}, "
+            f"max {_MAX_LIMIT}). Activates pagination envelope output."
+        ),
+    )
+    parser.add_argument(
+        "--offset", type=int, default=0, metavar="N",
+        help="Zero-based starting index for pagination (default 0).",
+    )
 
     args = parser.parse_args(argv)
     events = load_events()
@@ -182,6 +234,14 @@ def main(argv: list[str] | None = None) -> int:
         event_type=args.event_type,
         search=args.search,
     )
+
+    # Pagination mode: --limit or non-zero --offset activates the envelope
+    use_pagination = args.limit is not None or args.offset != 0
+    if use_pagination:
+        limit = args.limit if args.limit is not None else _DEFAULT_LIMIT
+        page = paginate(results, limit=limit, offset=args.offset)
+        print(json.dumps(page, indent=2))
+        return 0
 
     if not results:
         sys.stderr.write(
