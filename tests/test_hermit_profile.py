@@ -20,10 +20,13 @@ from tools.hermit_profile import (
     _extract_section,
     _first_paragraph,
     _extract_build_bullets,
+    _significance_score,
     list_hermits,
     find_hermit_file,
     load_profile,
     load_hermit_events,
+    build_top_collaborators,
+    build_highlight_moments,
     build_output,
     format_profile_text,
     main,
@@ -532,6 +535,336 @@ class TestCLI(unittest.TestCase):
     def test_case_insensitive_match(self):
         rc, _, _ = self._run(["--hermit", "GRIAN"])
         self.assertEqual(rc, 0)
+
+
+# ---------------------------------------------------------------------------
+# _significance_score
+# ---------------------------------------------------------------------------
+class TestSignificanceScore(unittest.TestCase):
+    def _ev(self, **kw) -> dict:
+        base = {"type": "milestone", "hermits": ["Grian"], "date_precision": "month"}
+        base.update(kw)
+        return base
+
+    def test_milestone_base_score(self):
+        self.assertEqual(_significance_score(self._ev(type="milestone")), 10)
+
+    def test_meta_base_score(self):
+        self.assertEqual(_significance_score(self._ev(type="meta")), 1)
+
+    def test_all_hermits_bonus(self):
+        self.assertEqual(_significance_score(self._ev(type="milestone", hermits=["All"])), 13)
+
+    def test_four_hermits_bonus(self):
+        self.assertEqual(_significance_score(self._ev(type="build", hermits=["A", "B", "C", "D"])), 7)
+
+    def test_pair_bonus(self):
+        self.assertEqual(_significance_score(self._ev(type="build", hermits=["A", "B"])), 6)
+
+    def test_day_precision_bonus(self):
+        self.assertEqual(_significance_score(self._ev(type="build", hermits=["A"], date_precision="day")), 6)
+
+    def test_unknown_type_is_int(self):
+        self.assertIsInstance(_significance_score(self._ev(type="xyzunknown")), int)
+
+
+# ---------------------------------------------------------------------------
+# build_top_collaborators
+# ---------------------------------------------------------------------------
+class TestBuildTopCollaborators(unittest.TestCase):
+    def _events(self):
+        return [
+            {"hermits": ["Grian", "Scar"], "season": 9},
+            {"hermits": ["Grian", "Scar"], "season": 9},
+            {"hermits": ["Grian", "Mumbo"], "season": 9},
+            {"hermits": ["Grian"], "season": 9},
+            {"hermits": ["All"], "season": 9},
+        ]
+
+    def test_returns_list(self):
+        self.assertIsInstance(build_top_collaborators("Grian", self._events()), list)
+
+    def test_scar_is_top_collaborator(self):
+        result = build_top_collaborators("Grian", self._events(), top_n=5)
+        self.assertEqual(result[0]["hermit"], "Scar")
+
+    def test_scar_count_is_2(self):
+        result = build_top_collaborators("Grian", self._events(), top_n=5)
+        scar = next(r for r in result if r["hermit"] == "Scar")
+        self.assertEqual(scar["co_event_count"], 2)
+
+    def test_mumbo_count_is_1(self):
+        result = build_top_collaborators("Grian", self._events(), top_n=5)
+        mumbo = next((r for r in result if r["hermit"] == "Mumbo"), None)
+        self.assertIsNotNone(mumbo)
+        self.assertEqual(mumbo["co_event_count"], 1)
+
+    def test_all_excluded(self):
+        result = build_top_collaborators("Grian", self._events(), top_n=10)
+        names = [r["hermit"] for r in result]
+        self.assertNotIn("All", names)
+
+    def test_self_excluded(self):
+        result = build_top_collaborators("Grian", self._events(), top_n=10)
+        names = [r["hermit"] for r in result]
+        self.assertNotIn("Grian", names)
+
+    def test_top_n_limits(self):
+        result = build_top_collaborators("Grian", self._events(), top_n=1)
+        self.assertLessEqual(len(result), 1)
+
+    def test_ranks_sequential(self):
+        result = build_top_collaborators("Grian", self._events(), top_n=5)
+        for i, entry in enumerate(result, start=1):
+            self.assertEqual(entry["rank"], i)
+
+    def test_required_keys(self):
+        required = {"rank", "hermit", "co_event_count"}
+        for entry in build_top_collaborators("Grian", self._events(), top_n=5):
+            self.assertTrue(required.issubset(entry.keys()))
+
+    def test_empty_events_returns_empty(self):
+        self.assertEqual(build_top_collaborators("Grian", []), [])
+
+    def test_solo_events_no_collaborators(self):
+        events = [{"hermits": ["Grian"]} for _ in range(5)]
+        self.assertEqual(build_top_collaborators("Grian", events), [])
+
+    def test_sorted_by_count_desc(self):
+        result = build_top_collaborators("Grian", self._events(), top_n=5)
+        counts = [r["co_event_count"] for r in result]
+        self.assertEqual(counts, sorted(counts, reverse=True))
+
+    def test_case_insensitive_self_exclusion(self):
+        events = [{"hermits": ["grian", "Scar"]}]
+        result = build_top_collaborators("Grian", events, top_n=5)
+        names = [r["hermit"] for r in result]
+        self.assertNotIn("grian", names)
+
+    def test_co_event_count_is_int(self):
+        result = build_top_collaborators("Grian", self._events(), top_n=5)
+        for entry in result:
+            self.assertIsInstance(entry["co_event_count"], int)
+
+    def test_real_grian_has_collaborators(self):
+        events = load_hermit_events("Grian")
+        result = build_top_collaborators("Grian", events, top_n=5)
+        self.assertGreater(len(result), 0)
+
+
+# ---------------------------------------------------------------------------
+# build_highlight_moments
+# ---------------------------------------------------------------------------
+class TestBuildHighlightMoments(unittest.TestCase):
+    def _events(self):
+        return [
+            {"type": "milestone", "hermits": ["All"], "date_precision": "day",
+             "title": "Top Event", "date": "2022-03-01", "description": "Desc A"},
+            {"type": "build", "hermits": ["A", "B"], "date_precision": "month",
+             "title": "Build One", "date": "2022-06-01", "description": "Desc B"},
+            {"type": "lore", "hermits": ["X"], "date_precision": "month",
+             "title": "Lore Event", "date": "2022-07-01", "description": "Desc C"},
+            {"type": "meta", "hermits": ["Y"], "date_precision": "month",
+             "title": "Meta Event", "date": "2022-08-01", "description": "Desc D"},
+        ]
+
+    def test_returns_list(self):
+        self.assertIsInstance(build_highlight_moments(self._events()), list)
+
+    def test_top_n_limits(self):
+        self.assertLessEqual(len(build_highlight_moments(self._events(), top_n=2)), 2)
+
+    def test_highest_scored_is_first(self):
+        result = build_highlight_moments(self._events(), top_n=4)
+        self.assertEqual(result[0]["title"], "Top Event")
+
+    def test_sorted_by_score_desc(self):
+        result = build_highlight_moments(self._events(), top_n=4)
+        scores = [r["significance_score"] for r in result]
+        self.assertEqual(scores, sorted(scores, reverse=True))
+
+    def test_ranks_sequential(self):
+        result = build_highlight_moments(self._events(), top_n=4)
+        for i, entry in enumerate(result, start=1):
+            self.assertEqual(entry["rank"], i)
+
+    def test_required_keys(self):
+        required = {"rank", "title", "date", "type", "hermits",
+                    "significance_score", "description"}
+        for entry in build_highlight_moments(self._events(), top_n=4):
+            self.assertTrue(required.issubset(entry.keys()))
+
+    def test_empty_events_returns_empty(self):
+        self.assertEqual(build_highlight_moments([]), [])
+
+    def test_hermits_is_list(self):
+        for entry in build_highlight_moments(self._events(), top_n=4):
+            self.assertIsInstance(entry["hermits"], list)
+
+    def test_score_is_int(self):
+        for entry in build_highlight_moments(self._events(), top_n=4):
+            self.assertIsInstance(entry["significance_score"], int)
+
+    def test_default_top_n_is_3(self):
+        events = [{"type": "build", "hermits": ["A"], "date_precision": "month",
+                   "title": f"Event {i}", "date": f"2022-0{i+1}-01",
+                   "description": ""} for i in range(6)]
+        result = build_highlight_moments(events)
+        self.assertLessEqual(len(result), 3)
+
+    def test_real_grian_has_highlights(self):
+        events = load_hermit_events("Grian")
+        result = build_highlight_moments(events, top_n=3)
+        self.assertGreater(len(result), 0)
+
+
+# ---------------------------------------------------------------------------
+# build_output — new keys
+# ---------------------------------------------------------------------------
+class TestBuildOutputNewKeys(unittest.TestCase):
+    def setUp(self):
+        path = find_hermit_file("grian")
+        self.profile = load_profile(path)
+        self.events = load_hermit_events("Grian")
+
+    def test_has_top_collaborators(self):
+        out = build_output(self.profile, self.events)
+        self.assertIn("top_collaborators", out)
+
+    def test_has_highlight_moments(self):
+        out = build_output(self.profile, self.events)
+        self.assertIn("highlight_moments", out)
+
+    def test_top_collaborators_is_list(self):
+        out = build_output(self.profile, self.events)
+        self.assertIsInstance(out["top_collaborators"], list)
+
+    def test_highlight_moments_is_list(self):
+        out = build_output(self.profile, self.events)
+        self.assertIsInstance(out["highlight_moments"], list)
+
+    def test_top_collabs_param_respected(self):
+        out = build_output(self.profile, self.events, top_collabs=2)
+        self.assertLessEqual(len(out["top_collaborators"]), 2)
+
+    def test_top_highlights_param_respected(self):
+        out = build_output(self.profile, self.events, top_highlights=2)
+        self.assertLessEqual(len(out["highlight_moments"]), 2)
+
+    def test_json_serialisable(self):
+        out = build_output(self.profile, self.events)
+        serialised = json.dumps(out)
+        self.assertIsInstance(serialised, str)
+
+    def test_grian_has_collaborators(self):
+        out = build_output(self.profile, self.events)
+        # Grian has many collab events
+        self.assertGreater(len(out["top_collaborators"]), 0)
+
+    def test_grian_has_highlights(self):
+        out = build_output(self.profile, self.events)
+        self.assertGreater(len(out["highlight_moments"]), 0)
+
+
+# ---------------------------------------------------------------------------
+# format_profile_text — new sections
+# ---------------------------------------------------------------------------
+class TestFormatProfileTextNewSections(unittest.TestCase):
+    def setUp(self):
+        path = find_hermit_file("grian")
+        profile = load_profile(path)
+        events = load_hermit_events("Grian")
+        self.output = build_output(profile, events)
+        self.text = format_profile_text(self.output)
+
+    def test_has_top_collaborators_section(self):
+        self.assertIn("TOP COLLABORATORS", self.text)
+
+    def test_has_highlight_moments_section(self):
+        self.assertIn("HIGHLIGHT MOMENTS", self.text)
+
+    def test_collaborator_name_in_output(self):
+        if self.output["top_collaborators"]:
+            top_name = self.output["top_collaborators"][0]["hermit"]
+            self.assertIn(top_name, self.text)
+
+    def test_highlight_title_in_output(self):
+        if self.output["highlight_moments"]:
+            title = self.output["highlight_moments"][0]["title"]
+            self.assertIn(title, self.text)
+
+    def test_empty_collaborators_no_crash(self):
+        out = dict(self.output)
+        out["top_collaborators"] = []
+        text = format_profile_text(out)
+        self.assertIsInstance(text, str)
+
+    def test_empty_highlights_no_crash(self):
+        out = dict(self.output)
+        out["highlight_moments"] = []
+        text = format_profile_text(out)
+        self.assertIsInstance(text, str)
+
+    def test_returns_string(self):
+        self.assertIsInstance(self.text, str)
+
+
+# ---------------------------------------------------------------------------
+# CLI — new flags
+# ---------------------------------------------------------------------------
+class TestCLINewFlags(unittest.TestCase):
+    def _run(self, args: list[str]) -> tuple[int, str, str]:
+        import io
+        from contextlib import redirect_stdout, redirect_stderr
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(args)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_top_collabs_flag_limits(self):
+        _, out, _ = self._run(["--hermit", "Grian", "--json", "--top-collabs", "2"])
+        data = json.loads(out)
+        self.assertLessEqual(len(data["top_collaborators"]), 2)
+
+    def test_top_highlights_flag_limits(self):
+        _, out, _ = self._run(["--hermit", "Grian", "--json", "--top-highlights", "1"])
+        data = json.loads(out)
+        self.assertLessEqual(len(data["highlight_moments"]), 1)
+
+    def test_json_has_top_collaborators(self):
+        _, out, _ = self._run(["--hermit", "Scar", "--json"])
+        data = json.loads(out)
+        self.assertIn("top_collaborators", data)
+
+    def test_json_has_highlight_moments(self):
+        _, out, _ = self._run(["--hermit", "Scar", "--json"])
+        data = json.loads(out)
+        self.assertIn("highlight_moments", data)
+
+    def test_scar_top_collabs_correct_structure(self):
+        _, out, _ = self._run(["--hermit", "Scar", "--json", "--top-collabs", "5"])
+        data = json.loads(out)
+        for entry in data["top_collaborators"]:
+            self.assertIn("rank", entry)
+            self.assertIn("hermit", entry)
+            self.assertIn("co_event_count", entry)
+
+    def test_scar_highlight_moments_correct_structure(self):
+        _, out, _ = self._run(["--hermit", "Scar", "--json", "--top-highlights", "3"])
+        data = json.loads(out)
+        for entry in data["highlight_moments"]:
+            self.assertIn("rank", entry)
+            self.assertIn("title", entry)
+            self.assertIn("date", entry)
+            self.assertIn("significance_score", entry)
+
+    def test_text_output_has_collaborators_section(self):
+        _, out, _ = self._run(["--hermit", "Grian"])
+        self.assertIn("TOP COLLABORATORS", out)
+
+    def test_text_output_has_highlights_section(self):
+        _, out, _ = self._run(["--hermit", "Grian"])
+        self.assertIn("HIGHLIGHT MOMENTS", out)
 
 
 if __name__ == "__main__":

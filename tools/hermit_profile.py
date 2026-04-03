@@ -3,18 +3,55 @@ tools/hermit_profile.py — Hermit biography lookup CLI.
 
 Returns a full biography for a named Hermit drawn from the knowledge base:
 join date, active seasons, specialties, subscriber milestones, bio paragraph,
-notable builds, teams, and related timeline events.
+notable builds, teams, related timeline events, top collaborators, and the
+hermit's best highlight moments.
+
+HTTP API contract
+-----------------
+GET /hermits/:name
+    Returns the full structured profile for a single hermit.
+
+    Path param  name      Case-insensitive partial match (e.g. "scar", "good times")
+    Query param top_collabs  Number of top collaborators to return (default 5)
+    Query param top_highlights  Number of highlight moments to return (default 3)
+    Query param season    Restrict timeline events to this season number
+
+    Response shape (JSON):
+        {
+            "handle": "GoodTimesWithScar",
+            "name": "GoodTimesWithScar",
+            ...
+            "seasons": [6, 7, 8, 9, 10, 11],
+            "top_collaborators": [
+                {"rank": 1, "hermit": "Grian", "co_event_count": 12},
+                ...
+            ],
+            "highlight_moments": [
+                {"rank": 1, "title": "...", "date": "...", "type": "...",
+                 "hermits": [...], "significance_score": 13, "description": "..."},
+                ...
+            ],
+            "events": [...],
+            "event_count": 42
+        }
+
+GET /hermits
+    Returns [{handle, name, status}] for all hermits (--list flag).
 
 Usage:
     python -m tools.hermit_profile --hermit Grian
+    python -m tools.hermit_profile --hermit GoodTimesWithScar --json
     python -m tools.hermit_profile --hermit tangotek --json
     python -m tools.hermit_profile --hermit "mumbo jumbo" --season 7
+    python -m tools.hermit_profile --hermit Scar --top-collabs 3 --top-highlights 5
     python -m tools.hermit_profile --list
 """
 
 from __future__ import annotations
 
 import argparse
+import collections
+import itertools
 import json
 import re
 import sys
@@ -292,6 +329,111 @@ def load_hermit_events(hermit_name: str, season_filter: int | None = None) -> li
 
 
 # ---------------------------------------------------------------------------
+# Significance scoring (mirrors season_digest._significance_score)
+# ---------------------------------------------------------------------------
+
+_TYPE_SCORE: dict[str, int] = {
+    "milestone": 10,
+    "lore": 8,
+    "game": 7,
+    "collab": 6,
+    "build": 5,
+    "meta": 1,
+}
+
+
+def _significance_score(event: dict) -> int:
+    score = _TYPE_SCORE.get(event.get("type", ""), 0)
+    hermits = event.get("hermits", [])
+    if hermits == ["All"]:
+        score += 3
+    elif len(hermits) >= 4:
+        score += 2
+    elif len(hermits) >= 2:
+        score += 1
+    if event.get("date_precision") == "day":
+        score += 1
+    return score
+
+
+def _event_date_key(ev: dict) -> tuple[int, int, int]:
+    parts = ev.get("date", "").split("-")
+    try:
+        return (
+            int(parts[0]) if len(parts) > 0 else 9999,
+            int(parts[1]) if len(parts) > 1 else 0,
+            int(parts[2]) if len(parts) > 2 else 0,
+        )
+    except (ValueError, IndexError):
+        return (9999, 0, 0)
+
+
+# ---------------------------------------------------------------------------
+# Collaborator & highlight builders
+# ---------------------------------------------------------------------------
+
+def build_top_collaborators(
+    hermit_name: str, events: list[dict], top_n: int = 5
+) -> list[dict]:
+    """
+    Return the *top_n* hermits that most frequently co-appear in events with
+    *hermit_name*.
+
+    "All" entries are skipped.  Events where only the hermit appears alone
+    are also skipped (no co-hermit to count).
+
+    Each entry: rank, hermit, co_event_count
+    """
+    norm = _normalise(hermit_name)
+    counter: collections.Counter = collections.Counter()
+    for ev in events:
+        hermits = ev.get("hermits", [])
+        if hermits == ["All"]:
+            continue
+        named = [h for h in hermits if _normalise(h) != norm and h != "All"]
+        for co in named:
+            counter[co] += 1
+
+    results: list[dict] = []
+    for rank, (hermit, count) in enumerate(counter.most_common(top_n), start=1):
+        results.append({"rank": rank, "hermit": hermit, "co_event_count": count})
+    return results
+
+
+def build_highlight_moments(
+    events: list[dict], top_n: int = 3
+) -> list[dict]:
+    """
+    Return the *top_n* most significant events from *events*.
+
+    Ranked by significance score (descending), then chronologically (ascending)
+    to break ties.
+
+    Each entry: rank, title, date, type, hermits, significance_score, description
+    """
+    scored = [
+        (_significance_score(ev), _event_date_key(ev), ev)
+        for ev in events
+    ]
+    scored.sort(key=lambda x: (-x[0], x[1]))
+
+    results: list[dict] = []
+    for rank, (score, _, ev) in enumerate(scored[:top_n], start=1):
+        results.append(
+            {
+                "rank": rank,
+                "title": ev.get("title", "(untitled)"),
+                "date": ev.get("date", ""),
+                "type": ev.get("type", ""),
+                "hermits": ev.get("hermits", []),
+                "significance_score": score,
+                "description": ev.get("description", ""),
+            }
+        )
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Output builders
 # ---------------------------------------------------------------------------
 
@@ -299,8 +441,16 @@ def build_output(
     profile: dict,
     events: list[dict],
     season_filter: int | None = None,
+    top_collabs: int = 5,
+    top_highlights: int = 3,
 ) -> dict:
     """Assemble the final output dict from a loaded profile + events."""
+    # Build collaborators and highlights from all hermit events (not season-
+    # filtered ones) so they reflect the hermit's full Hermitcraft history.
+    all_events_for_collabs = events  # already filtered by season if requested
+    collaborators = build_top_collaborators(profile["name"], all_events_for_collabs, top_n=top_collabs)
+    highlights = build_highlight_moments(all_events_for_collabs, top_n=top_highlights)
+
     out: dict = {
         "handle": profile["handle"],
         "name": profile["name"],
@@ -319,6 +469,8 @@ def build_output(
         "notable_builds_raw": profile["notable_builds"],
         "teams_raw": profile["teams"],
         "trivia_raw": profile["trivia"],
+        "top_collaborators": collaborators,
+        "highlight_moments": highlights,
         "events": events,
         "event_count": len(events),
     }
@@ -413,6 +565,35 @@ def format_profile_text(output: dict) -> str:
             lines.append(f"  • {m['count']}  ({m['date']})")
         lines.append("")
 
+    # Top collaborators
+    collabs = output.get("top_collaborators") or []
+    if collabs:
+        lines.append("TOP COLLABORATORS")
+        lines.append("-" * 40)
+        for entry in collabs:
+            count = entry["co_event_count"]
+            plural = "s" if count != 1 else ""
+            lines.append(f"  {entry['rank']}. {entry['hermit']} — {count} shared event{plural}")
+        lines.append("")
+
+    # Highlight moments
+    highlights = output.get("highlight_moments") or []
+    if highlights:
+        lines.append("HIGHLIGHT MOMENTS")
+        lines.append("-" * 40)
+        for entry in highlights:
+            date = entry.get("date", "")
+            title = entry.get("title", "(untitled)")
+            ev_type = entry.get("type", "")
+            score = entry.get("significance_score", 0)
+            tag = f"[{ev_type}·score:{score}]" if ev_type else f"[score:{score}]"
+            lines.append(f"  {entry['rank']}. {date}  {tag}  {title}")
+            desc = entry.get("description", "")
+            if desc:
+                # Indent description
+                lines.append(f"     {desc[:120]}{'…' if len(desc) > 120 else ''}")
+        lines.append("")
+
     # Timeline events
     events = output.get("events") or []
     season_filter = output.get("season_filter")
@@ -468,6 +649,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Restrict timeline events shown to this season number",
     )
     p.add_argument(
+        "--top-collabs",
+        type=int,
+        default=5,
+        metavar="N",
+        help="Number of top collaborators to include (default: 5)",
+    )
+    p.add_argument(
+        "--top-highlights",
+        type=int,
+        default=3,
+        metavar="N",
+        help="Number of highlight moments to include (default: 3)",
+    )
+    p.add_argument(
         "--json",
         action="store_true",
         help="Output as JSON instead of formatted text",
@@ -503,7 +698,13 @@ def main(argv: list[str] | None = None) -> int:
 
     profile = load_profile(path)
     events = load_hermit_events(profile["name"], season_filter=args.season)
-    output = build_output(profile, events, season_filter=args.season)
+    output = build_output(
+        profile,
+        events,
+        season_filter=args.season,
+        top_collabs=args.top_collabs,
+        top_highlights=args.top_highlights,
+    )
 
     if args.json:
         print(json.dumps(output, indent=2))
